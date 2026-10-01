@@ -1,0 +1,45 @@
+# Gitar Tab Transkripsiyon — Katmanlı Yol Haritası
+
+Ses/video → NoteEvent listesi → tab. Her katman bir öncekinin üstüne biner,
+hiçbir şeyi kırmadan. Şu an **Katman 0** bitti.
+
+## Katmanlar
+
+- [x] **Katman 0 — Temel (BİTTİ).** Değiştirmesi pahalı 4 karar sabitlendi:
+  - `gtab/config.py` — ses/CQT sabitleri (bir kez, ömür boyu)
+  - `gtab/instrument.py` — enstrüman soyutlaması (farklı gitarlar için future-proof)
+  - `gtab/note_event.py` — ara veri şeması (pipeline'ın belkemiği)
+  - `get_data.py` — GuitarSet edinme (altın standart veri)
+
+- [x] **Katman 1 — Özellik + veri yükleyici (BİTTİ).**
+  - `gtab/features.py` — ses → log-CQT (n_frames, n_bins)
+  - `gtab/labels.py` — NoteEvent → kare-seviye frame_roll + onset_roll
+  - `build_dataset.py` — solo filtresi, oyuncuya göre train/val, .npz önbellek
+
+- [x] **Katman 2 — Monofonik uçtan uca (BİTTİ).**
+  - `gtab/torch_dataset.py` — önbellekten CQT pencereleri
+  - `gtab/model.py` — PitchCNN (CQT penceresi → perde)
+  - `gtab/decode.py` — kareler → notalar → naif perde ataması → ASCII tab
+  - `train.py` — eğitim + kare-seviye F1 + `--demo` ile tek dosya transkripsiyonu
+
+- [ ] **Katman 3 — Gerçek string/fret.** GuitarSet'in tel etiketleriyle
+  TabCNN/CRNN tarzı model. Artık pozisyon tahmin değil, gerçek.
+
+- [ ] **Katman 4 — Teknikler.** Sürekli F0 eğrisi + onset zarfı → önce BEND,
+  sonra slide, hammer/pull, vibrato. Senin asıl hedefin.
+
+- [ ] **Katman 5 — Ritim + render.** Tempo/beat takibi, kuantalama; AlphaTab
+  ile bend/slide sembollü gerçek tab görseli.
+
+- [ ] **Katman 6 — Zorlaştırma.** Polifoni (akorlar), distortion dayanıklılığı,
+  farklı gitarlar/akortlar.
+
+## Kurulum
+```bash
+pip install mirdata librosa numpy
+python get_data.py     # GuitarSet indirir (birkaç GB, ilk sefer)
+```
+
+## Tasarım ilkesi
+Özellikleri değil, ARAYÜZLERİ önden sağlamlaştır. NoteEvent bugün yarı boş
+(string/fret/technique = None); her katman bir alanı doldurur.
