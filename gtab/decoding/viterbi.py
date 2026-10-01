@@ -1,0 +1,210 @@
+"""
+Katman 3.6 — Viterbi tel ataması (string assignment).
+
+TEŞHİS: pitch F1 ~0.83 (perde doğru) ama tab F1 ~0.58 (tel yanlış). Yani asıl
+kayıp telde. Karışık mikrofon sesinde tel kimliği fiziksel olarak zayıf bir
+sinyal; onu sadece akustikten zorlamak yerine, GİTARİSTİN KISITINI kullanırız:
+el rastgele zıplamaz, ardışık notalar birbirine yakın pozisyonlarda çalınır.
+
+YAKLAŞIM (iki sinyali BİRLEŞTİRİR, kuralla değiştirmez):
+  emisyon  = modelin o (tel, fret) için verdiği log-olasılık   [öğrenilen]
+  geçiş    = el hareketi maliyeti (fret mesafesi, tel atlama)  [müzikal önsel]
+  Viterbi  = toplam skoru maksimize eden ÇALINABİLİR yolu bulur
+
+Bu yüzden model güçlendikçe (veri zenginleştikçe) emisyon ağırlığı artırılarak
+kurallar geri çekilebilir -- `w_emission` tam bunun için var. Yani bu çözüm
+"şimdilik idare etsin" değil; modelin gelişimiyle birlikte ölçeklenir.
+
+Retrain GEREKTİRMEZ: mevcut model çıktıları (softmax olasılıkları) üstünde çalışır.
+"""
+
+import numpy as np
+from typing import List, Tuple
+
+from gtab.core.note_event import NoteEvent, Transcription
+from gtab.core.instrument import Instrument, STANDARD_6
+from gtab.config import FRAME_RATE
+
+
+# ---------------------------------------------------------------- perde matrisi
+def pitch_matrix(probs: np.ndarray, instrument: Instrument = STANDARD_6):
+    """
+    probs: (T, S, ncls) softmax. -> (pitch_mat (T, P), pitch_lo)
+    Her perde için: o perdeyi üretebilen TÜM (tel, fret) pozisyonları arasından
+    EN YÜKSEK olasılık. Teli marjinalize eder; geriye güçlü perde sinyali kalır.
+    """
+    T, S, ncls = probs.shape
+    lo, hi = instrument.pitch_range()
+    P = hi - lo + 1
+    out = np.zeros((T, P), dtype=np.float32)
+    for p in range(P):
+        pitch = lo + p
+        for (s, f) in instrument.pitch_to_positions(pitch):
+            if f + 1 < ncls:
+                np.maximum(out[:, p], probs[:, s, f + 1], out=out[:, p])
+    return out, lo
+
+
+def segment_notes(pitch_mat: np.ndarray, pitch_lo: int, threshold=0.5,
+                  frame_rate: float = FRAME_RATE, min_frames: int = 2
+                  ) -> List[Tuple[int, int, int]]:
+    """
+    (T,P) perde matrisi -> [(start_frame, end_frame, pitch), ...]
+    Ardışık aktif kareleri nota yapar.
+    """
+    active = pitch_mat > threshold
+    T, P = active.shape
+    notes = []
+    for p in range(P):
+        t = 0
+        while t < T:
+            if active[t, p]:
+                s = t
+                while t < T and active[t, p]:
+                    t += 1
+                if t - s >= min_frames:
+                    notes.append((s, t, pitch_lo + p))
+            else:
+                t += 1
+    notes.sort(key=lambda n: (n[0], n[2]))
+    return notes
+
+
+# ---------------------------------------------------------------- maliyetler
+def transition_cost(prev, cur, gap_sec, w_fret=1.0, w_string=0.35,
+                    open_discount=0.3, gap_relax=0.5):
+    """
+    İki ardışık nota pozisyonu arasındaki EL HAREKETİ maliyeti.
+    prev/cur: (string, fret)
+    - fret mesafesi ana maliyet (el kaydırmak zor)
+    - tel atlama daha ucuz (el aynı pozisyonda kalır)
+    - açık tel (fret 0) eli bağlamaz ama BEDAVA DEĞİL: open_discount ile indirimli.
+      DİKKAT: bedava yapılırsa "hep açık tel" yolu dejenere bir çekim merkezi olur
+      ve modelin emisyon sinyalini tamamen ezer (test edilip görüldü).
+    - aradaki süre uzunsa elin taşınacak zamanı var -> maliyet azalır
+    """
+    ps, pf = prev
+    cs, cf = cur
+    fret_cost = abs(pf - cf)
+    if pf == 0 or cf == 0:
+        fret_cost *= open_discount
+    cost = w_fret * fret_cost + w_string * abs(ps - cs)
+    # zaman gevşemesi: uzun boşlukta el rahat taşınır
+    cost /= (1.0 + gap_relax * max(0.0, gap_sec))
+    return cost
+
+
+def emission_logprob(probs, start, end, s, f, eps=1e-8):
+    """Nota süresince modelin (tel s, fret f) için ortalama log-olasılığı."""
+    return float(np.log(probs[start:end, s, f + 1] + eps).mean())
+
+
+# ---------------------------------------------------------------- Viterbi
+def viterbi_assign(notes, probs, instrument: Instrument = STANDARD_6,
+                   frame_rate: float = FRAME_RATE,
+                   w_emission=1.0, w_transition=0.6,
+                   w_fret=1.0, w_string=0.35, open_discount=0.3, gap_relax=0.5,
+                   high_fret_penalty=0.02):
+    """
+    notes: [(start, end, pitch)] zaman sırasına göre.
+    -> her nota için seçilen (string, fret) listesi.
+
+    Skor = w_emission * Σ emisyon  -  w_transition * Σ geçiş maliyeti
+    high_fret_penalty: eşit koşulda daha düşük pozisyonu tercih (çok küçük tutulur).
+    """
+    n = len(notes)
+    if n == 0:
+        return []
+
+    cands = [instrument.pitch_to_positions(p) for (_, _, p) in notes]
+
+    # ilk nota
+    prev_scores = []
+    for (s, f) in cands[0]:
+        start, end, _ = notes[0]
+        sc = w_emission * emission_logprob(probs, start, end, s, f) \
+             - high_fret_penalty * f
+        prev_scores.append(sc)
+    prev_scores = np.array(prev_scores, dtype=np.float64) if cands[0] else np.array([])
+    backptr = []
+
+    for i in range(1, n):
+        start, end, _ = notes[i]
+        prev_start, prev_end, _ = notes[i - 1]
+        gap_sec = max(0.0, (start - prev_end) / frame_rate)
+
+        cur = cands[i]
+        if not cur or prev_scores.size == 0:
+            # çalınamayan perde (enstrüman aralığı dışı) -> zinciri kır
+            backptr.append([-1] * max(1, len(cur)))
+            prev_scores = np.array([
+                w_emission * emission_logprob(probs, start, end, s, f) - high_fret_penalty * f
+                for (s, f) in cur
+            ], dtype=np.float64) if cur else np.array([])
+            continue
+
+        scores = np.empty(len(cur), dtype=np.float64)
+        ptr = np.empty(len(cur), dtype=np.int64)
+        for j, (s, f) in enumerate(cur):
+            emis = w_emission * emission_logprob(probs, start, end, s, f) \
+                   - high_fret_penalty * f
+            trans = np.array([
+                transition_cost(prev_pos, (s, f), gap_sec, w_fret, w_string,
+                                open_discount=open_discount, gap_relax=gap_relax)
+                for prev_pos in cands[i - 1]
+            ], dtype=np.float64)
+            total = prev_scores - w_transition * trans
+            k = int(total.argmax())
+            scores[j] = total[k] + emis
+            ptr[j] = k
+        backptr.append(ptr.tolist())
+        prev_scores = scores
+
+    # geri izleme
+    path = [0] * n
+    if prev_scores.size:
+        path[n - 1] = int(np.argmax(prev_scores))
+    for i in range(n - 1, 0, -1):
+        k = backptr[i - 1][path[i]] if path[i] < len(backptr[i - 1]) else -1
+        path[i - 1] = k if k >= 0 else 0
+
+    out = []
+    for i, idx in enumerate(path):
+        out.append(cands[i][idx] if cands[i] else (None, None))
+    return out
+
+
+# ---------------------------------------------------------------- uçtan uca
+def viterbi_transcribe(probs, instrument: Instrument = STANDARD_6,
+                      threshold=0.5, frame_rate: float = FRAME_RATE,
+                      min_frames=2, **vit_kwargs) -> Transcription:
+    """probs (T,S,ncls) -> Transcription (string/fret Viterbi ile atanmış)."""
+    pm, lo = pitch_matrix(probs, instrument)
+    segs = segment_notes(pm, lo, threshold, frame_rate, min_frames)
+    assigns = viterbi_assign(segs, probs, instrument, frame_rate, **vit_kwargs)
+
+    events = []
+    for (start, end, pitch), (s, f) in zip(segs, assigns):
+        ev = NoteEvent(start / frame_rate, end / frame_rate, pitch)
+        ev.string, ev.fret = s, f
+        events.append(ev)
+    return Transcription(notes=events).sort()
+
+
+def transcription_to_frames(tr: Transcription, n_frames: int,
+                            instrument: Instrument = STANDARD_6,
+                            frame_rate: float = FRAME_RATE) -> np.ndarray:
+    """
+    Transcription -> (T, S) sınıf dizisi (0=sessiz, fret+1).
+    Mevcut tab F1 metriğiyle AYNI temelde karşılaştırabilmek için gerekli.
+    """
+    S = instrument.num_strings
+    out = np.zeros((n_frames, S), dtype=np.int64)
+    for n in tr.notes:
+        if not n.has_position():
+            continue
+        a = max(0, int(round(n.onset * frame_rate)))
+        b = min(n_frames, int(round(n.offset * frame_rate)))
+        if b > a:
+            out[a:b, n.string] = n.fret + 1
+    return out

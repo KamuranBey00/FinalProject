@@ -1,4 +1,10 @@
 torch
 numpy
+scipy
+pandas
 librosa
+soundfile
 mirdata
+pretty_midi
+mir_eval
+huggingface_hub

@@ -44,17 +44,17 @@ ASCII tab çıktısı
 
 ## Mimari ve teknik detaylar
 
-**Ses ön-işleme** ([gtab/config.py](gtab/config.py), [gtab/features.py](gtab/features.py))
+**Ses ön-işleme** ([gtab/config.py](gtab/config.py), [gtab/data/features.py](gtab/data/features.py))
 - Örnekleme hızı: 22050 Hz, hop uzunluğu: 512 (~23 ms kare çözünürlüğü, ~43 kare/sn)
 - Girdi temsili: **Constant-Q Transform (log-CQT)** — C1'den (32.7 Hz) başlayıp 8
   oktav (192 bin), oktav başına 24 bin (yarım ses başına 2 bin — bend gibi
   mikroton geçişlerini yakalamak için)
 
-**Ara veri şeması** ([gtab/note_event.py](gtab/note_event.py)) — `NoteEvent`
+**Ara veri şeması** ([gtab/core/note_event.py](gtab/core/note_event.py)) — `NoteEvent`
 (onset, offset, pitch, string, fret, technique) ve `Transcription`; pipeline'ın
 tüm katmanlarının paylaştığı tek kaynak.
 
-**Modeller** ([gtab/model.py](gtab/model.py))
+**Modeller** ([gtab/models/nets.py](gtab/models/nets.py))
 | Model | Girdi | Çıktı | Kullanım |
 |---|---|---|---|
 | `PitchCNN` | CQT penceresi (context=9 kare) | çok-etiketli perde logit'i | Katman 2 — sadece perde |
@@ -66,7 +66,7 @@ MaxPool2d(2) → Dropout(0.25)`. TabCRNN'de zaman ekseni korunur (sadece frekans
 ekseni havuzlanır), ardından `Linear → BiLSTM(hidden=128, 2 katman) → Linear`
 ile zamansal bağlam eklenir.
 
-**Eğitim** ([train.py](train.py), [train_tab.py](train_tab.py), [train_crnn.py](train_crnn.py))
+**Eğitim** ([scripts/train/](scripts/train/): train_pitch, train_tab, train_crnn, train_domain)
 - Adam optimizer, cosine learning-rate decay, sabit seed (tekrarlanabilirlik)
 - Sınıf dengesizliği için ayarlanabilir class-weighting (`inv`/`sqrt`, cap'li)
 - **Sessizlik-marjı taraması** (`--sweep`): retrain gerektirmeden precision/recall
@@ -83,25 +83,40 @@ ile zamansal bağlam eklenir.
 |---|---|---|---|
 | 2 — Monofonik perde | PitchCNN | kare-seviye F1 (eşik 0.90, oyuncu 05 val) | **0.853** |
 | 3 — Gerçek tel/fret | TabCNN | tab F1 tavanı | **~0.586** (düşük precision, orta-nota tel sıçramasından) |
-| 3.5 — Zamansal | TabCRNN | — | mimari BiLSTM ile tel-sıçramasını kaynağında azaltmayı hedefliyor; tam veri/GPU üzerinde nihai sayılar henüz raporlanmadı |
+| 3.5 — Zamansal | TabCRNN | tab F1 (argmax + marj) | 0.634 |
+| 3.6 — Tel ataması | TabCRNN + nota başına tek pozisyon | tab F1 | 0.664 (el yapımı / öğrenilen önsel katkı vermedi) |
+| 3.7 — Veri genişletme | TabCRNN + GuitarSet comp (`tabcrnn_comp.pt`) | tab F1 / oracle tel doğruluğu | **0.667** / 0.762 |
+| 3.8 — Klasik gitar | TabCRNN + GAPS perde ince ayarı (`tabcrnn_gaps.pt`) | GuitarSet tab F1 / GAPS nota F1 | **0.697** / 0.360 (önce 0.255) — [README9](docs/devlog/README9.md) |
 
 Detaylı gerekçeler ve ara deneyler için [docs/devlog/](docs/devlog/) klasörüne bakın.
 
 ## Repo yapısı
 
 ```
-gtab/                  çekirdek kütüphane (config, features, labels, model, decode, ...)
-build_dataset.py       GuitarSet -> CQT + frame/onset roll -> .npz önbellek (data/cache)
-build_tab_labels.py    önbelleğe tel/fret etiketi ekler
-get_data.py            GuitarSet indirme (mirdata)
-train.py               Katman 2 eğitimi (PitchCNN)
-train_tab.py           Katman 3 eğitimi (TabCNN) + sweep + demo
-train_crnn.py          Katman 3.5 eğitimi (TabCRNN) + sweep + demo
-sweep_threshold.py     Katman 2 için eşik taraması
-data/cache/             önbelleğe alınmış eğitim/doğrulama özellikleri (.npz)
-pitchcnn.pt / tabcnn.pt / tabcrnn.pt   eğitilmiş model ağırlıkları
-docs/devlog/            katman katman geliştirme günlüğü (eski README sürümleri)
+gtab/                       çekirdek kütüphane (yalnızca import edilir)
+  config.py, paths.py       ses/CQT sabitleri, proje yolları
+  core/                     instrument (akort, tel/perde), note_event (ortak nota şeması)
+  data/                     features (CQT), labels, tab_labels, torch_dataset,
+                            guitarset / gaps / synthtab (veri seti okuyucuları)
+  models/                   nets (PitchCNN, TabCNN, TabCRNN), losses, inference
+  decoding/                 decode (çözümleme, ASCII tab), viterbi, transitions
+  evaluation/               metrics
+scripts/                    çalıştırılan dosyalar (python -m scripts.<klasör>.<ad>)
+  data/                     get_guitarset, build_guitarset, build_tab_labels, build_comp,
+                            get_gaps, build_gaps, build_synthtab
+  train/                    train_pitch (K2), train_tab (K3), train_crnn (K3.5–3.7), train_domain (K3.8)
+  eval/                     sweep_threshold (K2), eval_viterbi (K3.6), eval_hmm (K3.6b), eval_pitch (K3.8)
+checkpoints/                *.pt model ağırlıkları + transitions.npz
+data/cache/                 önbellek (.npz): train, val, train_comp, val_comp, gaps_*, synthtab_*  -- git'e girmez
+data/raw/                   ham veri (GAPS, SynthTab zip'leri)                                  -- git'e girmez
+docs/devlog/                katman katman geliştirme günlüğü
+inputs/                     proje sunumu ve katman karar belgeleri
 ```
+
+Eski düz yapıdan yeni yollara geçiş (devlog'lardaki eski komutlar için):
+`train.py → scripts/train/train_pitch.py`, `get_data.py → scripts/data/get_guitarset.py`,
+`build_dataset.py → scripts/data/build_guitarset.py`, diğer script'ler aynı adla
+`scripts/{data,train,eval}/` altında; `*.pt` dosyaları `checkpoints/` altında.
 
 ## Kurulum
 
@@ -109,28 +124,35 @@ docs/devlog/            katman katman geliştirme günlüğü (eski README sür�
 pip install -r requirements.txt
 ```
 
-Gereksinimler: `torch`, `numpy`, `librosa`, `mirdata` (bkz. [requirements.txt](requirements.txt)).
+Tüm komutlar **proje kökünden** `python -m` ile çalıştırılır (kurulum gerekmez).
+`--ckpt` gibi argümanlara çıplak dosya adı verilirse `checkpoints/` altında aranır.
 
 ## Çalıştırma
 
 ```bash
-# (yalnızca ham veriden yeniden başlanıyorsa gerekli — bkz. aşağıdaki veri notu)
-python get_data.py
-python build_dataset.py
-python build_tab_labels.py
+# Veri (yalnızca ham veriden yeniden başlanıyorsa)
+python -m scripts.data.get_guitarset
+python -m scripts.data.build_guitarset
+python -m scripts.data.build_tab_labels
+python -m scripts.data.build_comp                 # Katman 3.7: comp kayıtları
 
 # Katman 2 — perde modeli
-python train.py --epochs 15
-python train.py --demo data/cache/val/05_Rock1-130-A_solo.npz
+python -m scripts.train.train_pitch --epochs 15
+python -m scripts.eval.sweep_threshold
 
-# Katman 3 — tel/fret modeli
-python train_tab.py --epochs 40
-python train_tab.py --sweep
-python train_tab.py --demo data/cache/val/05_Rock1-130-A_solo.npz --margin 0.10 --smooth 5
+# Katman 3 — TabCNN
+python -m scripts.train.train_tab --epochs 40
+python -m scripts.train.train_tab --sweep
 
-# Katman 3.5 — CRNN
-python train_crnn.py --epochs 30
-python train_crnn.py --demo data/cache/val/05_Rock1-130-A_solo.npz --margin 0.1 --smooth 5
+# Katman 3.5–3.7 — TabCRNN (+comp)
+python -m scripts.train.train_crnn --epochs 30 --splits train,train_comp --ckpt tabcrnn_comp.pt
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_comp.pt
+python -m scripts.train.train_crnn --demo data/cache/val/05_Rock1-130-A_solo.npz --ckpt tabcrnn_comp.pt --margin 0.8
+
+# Katman 3.8 — klasik gitar (ayrıntı: docs/devlog/README9.md)
+python -m scripts.data.get_gaps --splits train test
+python -m scripts.data.build_gaps --disjoint
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_comp.pt --splits gaps_test val val_comp
 ```
 
 ## Veri seti ve eğitilmiş modeller
@@ -138,19 +160,18 @@ python train_crnn.py --demo data/cache/val/05_Rock1-130-A_solo.npz --margin 0.1 
 **Veri seti:** [GuitarSet](https://guitarset.weebly.com/) — ~360 kayıt, hexafonik
 pickup ile kaydedilmiş gerçek gitar (her tel ayrı kanal, bu sayede "hangi tel
 çalındı" bilgisi etiketli), nota onset/offset + perde JAMS formatında. `mirdata`
-kütüphanesi ile indirilir ([get_data.py](get_data.py)).
+kütüphanesi ile indirilir ([scripts/data/get_guitarset.py](scripts/data/get_guitarset.py)).
 
 - Ham ses dosyaları **bu repoya dahil değildir** (GuitarSet birkaç GB ve ayrı bir
-  lisansla dağıtılan genel bir veri seti olduğu için); `python get_data.py`
+  lisansla dağıtılan genel bir veri seti olduğu için); `python -m scripts.data.get_guitarset`
   çalıştırıldığında `GUITARSET_DATA_HOME` ortam değişkeniyle belirtilen yola
   otomatik indirilir.
-- Bu repoda yer alan **[data/cache/](data/cache/)** klasörü, GuitarSet'ten
-  `build_dataset.py` ve `build_tab_labels.py` ile üretilmiş, modelleri eğitmek
-  için doğrudan kullanılabilen **önbelleğe alınmış CQT özellikleri + etiketleri**
-  içerir (oyuncuya göre train/val ayrımı yapılmış `.npz` dosyaları). Bu sayede
-  GuitarSet'i yeniden indirip işlemeden de eğitim/değerlendirme tekrarlanabilir.
-- **[pitchcnn.pt](pitchcnn.pt)**, **[tabcnn.pt](tabcnn.pt)**, **[tabcrnn.pt](tabcrnn.pt)**
-  — ilgili katmanlarda eğitilmiş, doğrudan yüklenebilir model ağırlıkları.
+- **Veri setleri ve önbellek repoda yok** (`data/` `.gitignore`'da). Kaynaklar:
+  GuitarSet (mirdata), GAPS v1.1 (https://huggingface.co/datasets/xavriley/GAPS),
+  SynthTab (https://github.com/yongyizang/SynthTab). Önbellek, `scripts/data/`
+  altındaki script'lerle yeniden üretilir (komutlar yukarıda ve devlog'larda).
+- **[checkpoints/](checkpoints/)** — ilgili katmanlarda eğitilmiş, doğrudan yüklenebilir model
+  ağırlıkları (`pitchcnn.pt`, `tabcnn.pt`, `tabcrnn.pt`, `tabcrnn_comp.pt` = güncel en iyi, ...).
 
 ## Geliştirme günlüğü (katman katman)
 
@@ -163,6 +184,10 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README3.md](docs/devlog/README3.md) — Katman 3 (gerçek tel/fret)
 - [docs/devlog/README4.md](docs/devlog/README4.md) — Katman 3 konsolidasyon + denetim düzeltmeleri
 - [docs/devlog/README5.md](docs/devlog/README5.md) — Katman 3.5 (CRNN)
+- [docs/devlog/README6.md](docs/devlog/README6.md) — Katman 3.6 (Viterbi tel ataması, el yapımı maliyet)
+- [docs/devlog/README7.md](docs/devlog/README7.md) — Katman 3.6b (öğrenilen geçiş modeli + teşhis)
+- [docs/devlog/README8.md](docs/devlog/README8.md) — Katman 3.7 (veri genişletme: comp + çoğaltma)
+- [docs/devlog/README9.md](docs/devlog/README9.md) — Katman 3.8 (klasik gitar: GAPS + SynthTab yol haritası)
 
 ## Yol haritası
 
@@ -171,6 +196,9 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [x] Katman 2 — Monofonik uçtan uca (PitchCNN)
 - [x] Katman 3 — Gerçek tel/fret (TabCNN)
 - [x] Katman 3.5 — Zamansal model (TabCRNN)
+- [x] Katman 3.6–3.7 — Tel ataması (Viterbi / öğrenilen önsel) + veri genişletme (comp)
+- [ ] Katman 3.8 — Klasik gitar alan uyarlaması: GAPS + SynthTab nylon
+      (sunum Phase 3–4; bkz. [docs/devlog/README9.md](docs/devlog/README9.md))
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

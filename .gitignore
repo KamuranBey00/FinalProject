@@ -6,3 +6,8 @@ __pycache__/
 .venv/
 venv/
 .claude/settings.local.json
+
+# Veri setleri git'e girmez: kaynaklar README'lerde, önbellek script'lerle
+# yeniden üretilir (scripts/data/*). Ham veri + tüm önbellek:
+/data/
+*.zip
