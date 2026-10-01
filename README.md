@@ -86,9 +86,11 @@ ile zamansal bağlam eklenir.
 | 3.5 — Zamansal | TabCRNN | tab F1 (argmax + marj) | 0.634 |
 | 3.6 — Tel ataması | TabCRNN + nota başına tek pozisyon | tab F1 | 0.664 (el yapımı / öğrenilen önsel katkı vermedi) |
 | 3.7 — Veri genişletme | TabCRNN + GuitarSet comp (`tabcrnn_comp.pt`) | tab F1 / oracle tel doğruluğu | **0.667** / 0.762 |
-| 3.8 — Klasik gitar | TabCRNN + GAPS perde ince ayarı (`tabcrnn_gaps.pt`) | GuitarSet tab F1 / GAPS nota F1 | **0.697** / 0.360 (önce 0.255) — [README9](docs/devlog/README9.md) |
+| 3.8 — Klasik gitar | TabCRNN + GAPS perde ince ayarı (`tabcrnn_gaps.pt`) | GuitarSet tab F1 / GAPS nota F1 | 0.697 / 0.360 (önce 0.255) — [README9](docs/devlog/README9.md) |
+| 3.9 — Tel/perde sesi | + onset kafası + harmonik istifleme (`tabcrnn_onset_h.pt`) | GuitarSet tab F1 / oracle tel / akorlu nota F1 | **0.739** / 0.850 / 0.724 — [README10](docs/devlog/README10.md) |
 
 Detaylı gerekçeler ve ara deneyler için [docs/devlog/](docs/devlog/) klasörüne bakın.
+Yeni katkıda bulunanlar için dosya rehberi ve çalışma kuralları: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repo yapısı
 
