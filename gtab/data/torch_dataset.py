@@ -123,12 +123,16 @@ class GuitarSetSeq(Dataset):
     PAD = -100
 
     def __init__(self, cache_dir, split, chunk=200, augment=False, num_frets=24,
-                 bins_per_semitone=2):
+                 bins_per_semitone=2, onsets=False):
         """
         split: tek split ("train") ya da liste (["train", "train_comp"]) -- Katman 3.7.
         augment: True ise her chunk'a rastgele CQT-uzayı çoğaltma (sadece EĞİTİMDE).
+        onsets: True ise tel başına onset hedefi de verilir (Katman 3.9) ->
+                __getitem__ (x, tab, onset (L,S), L) döndürür.
         """
         self.chunk = chunk
+        self.with_onsets = onsets
+        self.onsets = []
         self.augment = augment
         self.num_frets = num_frets
         self.bps = bins_per_semitone
@@ -145,6 +149,9 @@ class GuitarSetSeq(Dataset):
             if "tab" not in d:
                 raise KeyError(f"{path} icinde 'tab' yok. build_tab_labels.py calisti mi?")
             cqt = _normalize(d["cqt"]); tab = d["tab"].astype(np.int64)
+            if onsets:
+                from gtab.data.tab_labels import string_onsets
+                on_all = string_onsets(tab, d["onset"] if "onset" in d else None)
             T, n_bins = cqt.shape
             for start in range(0, T, chunk):
                 c = cqt[start:start + chunk]; tb = tab[start:start + chunk]
@@ -154,6 +161,10 @@ class GuitarSetSeq(Dataset):
                     pt = np.full((chunk, tab.shape[1]), self.PAD, np.int64); pt[:L] = tb
                     c, tb = pc, pt
                 self.items.append((c, tb, L))
+                if onsets:
+                    on = np.zeros((chunk, tab.shape[1]), np.uint8)
+                    on[:L] = on_all[start:start + chunk]
+                    self.onsets.append(on)
 
     def __len__(self): return len(self.items)
 
@@ -161,6 +172,9 @@ class GuitarSetSeq(Dataset):
         c, tb, L = self.items[i]
         if self.augment:
             c, tb = self._augment(c, tb)
+        if self.with_onsets:
+            return (torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb),
+                    torch.from_numpy(self.onsets[i].astype(np.float32)), L)
         return torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb), L
 
     # ------------------------------------------------------------ Katman 3.7
@@ -221,12 +235,21 @@ class PitchSeq(Dataset):
     Çıktı: (1, L, n_bins) cqt, (L, P) frame, gerçek uzunluk L.
     """
 
-    def __init__(self, files, chunk=200):
+    def __init__(self, files, chunk=200, onsets=False, dilate=2):
+        """onsets: True ise perde onset roll'u da verilir -> (x, frame, onset (L,P), L)."""
         self.items = []
+        self.with_onsets = onsets
+        self.onsets = []
         for path in files:
             with np.load(path) as d:
                 cqt = _normalize(d["cqt"]).astype(np.float16)
                 fr = d["frame"].astype(np.uint8)
+                on_all = d["onset"].astype(np.uint8) if onsets else None
+            if onsets and dilate > 1:                 # tel onset'iyle aynı tolerans
+                base = on_all.copy()
+                for k in range(1, dilate):
+                    on_all[k:] |= base[:-k]
+                on_all &= fr
             T, nb = cqt.shape
             for s in range(0, T, chunk):
                 c, f = cqt[s:s + chunk], fr[s:s + chunk]
@@ -235,11 +258,16 @@ class PitchSeq(Dataset):
                     c = np.vstack([c, np.zeros((chunk - L, nb), np.float16)])
                     f = np.vstack([f, np.zeros((chunk - L, f.shape[1]), np.uint8)])
                 self.items.append((c, f, L))
+                if onsets:
+                    o = np.zeros((chunk, fr.shape[1]), np.uint8); o[:L] = on_all[s:s + chunk]
+                    self.onsets.append(o)
 
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, i):
         c, f, L = self.items[i]
-        return (torch.from_numpy(c.astype(np.float32)).unsqueeze(0),
-                torch.from_numpy(f.astype(np.float32)), L)
+        x, fr = torch.from_numpy(c.astype(np.float32)).unsqueeze(0), torch.from_numpy(f.astype(np.float32))
+        if self.with_onsets:
+            return x, fr, torch.from_numpy(self.onsets[i].astype(np.float32)), L
+        return x, fr, L

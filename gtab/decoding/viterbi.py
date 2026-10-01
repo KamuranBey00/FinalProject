@@ -208,3 +208,69 @@ def transcription_to_frames(tr: Transcription, n_frames: int,
         if b > a:
             out[a:b, n.string] = n.fret + 1
     return out
+
+
+# ---------------------------------------------------------------- Katman 3.9: onset
+def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
+    """
+    probs (T,S,ncls), onsets (T,S) tel onset olasılığı -> (T,P) perde-onset matrisi.
+    Her perde için: o perdeyi çalabilen (tel, fret) pozisyonlarında
+    max(onset_tel · P(tel, fret)) -- pitch_matrix ile aynı marjinalizasyon.
+    """
+    T, S, ncls = probs.shape
+    lo, hi = instrument.pitch_range()
+    out = np.zeros((T, hi - lo + 1), dtype=np.float32)
+    for p in range(hi - lo + 1):
+        for (s, f) in instrument.pitch_to_positions(lo + p):
+            if f + 1 < ncls:
+                np.maximum(out[:, p], onsets[:, s] * probs[:, s, f + 1], out=out[:, p])
+    return out
+
+
+def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
+                        min_frames=2, lookahead=2):
+    """
+    Onsets & Frames kuralı:
+      - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
+        Onset'siz aktif kareler (hayalet nota kaynağı) atılır.
+      - Onset, perde 'lookahead' kare içinde aktifleşirse kabul edilir.
+      - Nota, perde aktif kaldıkça sürer; AYNI perdede yeni onset gelirse biter ve
+        yeni nota başlar (tekrar eden notalar artık birleşmez).
+    -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
+    """
+    active = pitch_mat > threshold
+    on = onset_mat > onset_threshold
+    T, P = active.shape
+    starts = on & ~np.vstack([np.zeros((1, P), bool), on[:-1]])      # yükselen kenarlar
+    notes = []
+    for p in range(P):
+        st = np.nonzero(starts[:, p])[0]
+        if not len(st):
+            continue
+        for k, s0 in enumerate(st):
+            nxt = st[k + 1] if k + 1 < len(st) else T
+            a = s0
+            while a < min(s0 + lookahead + 1, nxt) and not active[a, p]:
+                a += 1
+            if a >= nxt or a >= T or not active[a, p]:
+                continue
+            b = a
+            while b < nxt and active[b, p]:
+                b += 1
+            if b - s0 >= min_frames:
+                notes.append((int(s0), int(b), pitch_lo + p))
+    notes.sort(key=lambda n: (n[0], n[2]))
+    return notes
+
+
+def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
+            instrument: Instrument = STANDARD_6, min_frames: int = 2):
+    """
+    Tek giriş noktası: model çıktısı -> [(start, end, pitch)].
+    onsets None ise eski kare-eşik segmentasyonu (Katman 3.6), değilse onset tabanlı (3.9).
+    """
+    pm, lo = pitch_matrix(probs, instrument)
+    if onsets is None or onset_threshold is None:
+        return segment_notes(pm, lo, threshold, min_frames=min_frames)
+    om = pitch_onset_matrix(probs, onsets, instrument)
+    return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames)

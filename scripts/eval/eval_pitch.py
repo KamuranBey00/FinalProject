@@ -29,9 +29,9 @@ import numpy as np
 from gtab.config import FRAME_RATE
 from gtab.core.instrument import STANDARD_6
 from gtab.data.torch_dataset import _normalize
-from gtab.decoding.viterbi import pitch_matrix, segment_notes
+from gtab.decoding.viterbi import pitch_matrix, segment
 from gtab.evaluation.metrics import prf
-from gtab.models.inference import load_model, predict_probs
+from gtab.models.inference import load_model, predict_probs, predict_with_onsets
 from gtab.paths import CACHE_DIR
 from gtab.utils import get_device
 
@@ -65,16 +65,25 @@ def _to_mir(notes):
     return iv, hz
 
 
-def track_scores(probs, frame, onset, thr):
-    """-> dict(frame tp/fp/fn, note tp-sayıları, polifoni grupları)"""
+def track_scores(probs, ons, frame, onset, thr, onset_thr=None):
+    """
+    -> dict(frame tp/fp/fn, note tp-sayıları, polifoni grupları)
+    ons (T,S) verilirse (onset kafalı model) notalar onset ile başlatılır ve kare
+    tahmini de bu notalardan türetilir (Onsets & Frames); yoksa eski kare-eşik yolu.
+    """
     pm, lo = pitch_matrix(probs, INSTR)
     n = min(len(pm), len(frame))
-    pm, frame, onset = pm[:n], frame[:n] > 0, onset[:n] > 0
-    pred = pm > thr
+    frame, onset = frame[:n] > 0, onset[:n] > 0
+    est = segment(probs[:n], None if ons is None else ons[:n], thr, onset_thr, INSTR)
+    if ons is None or onset_thr is None:
+        pred = pm[:n] > thr
+    else:
+        pred = np.zeros_like(frame)
+        for a, b, p in est:
+            pred[a:b, p - lo] = True
 
     tp = int((pred & frame).sum()); fp = int((pred & ~frame).sum()); fn = int((~pred & frame).sum())
 
-    est = segment_notes(pm, lo, thr)
     ref = roll_to_notes(frame, onset, lo)
     ri, rp = _to_mir(ref); ei, ep = _to_mir(est)
     if len(ref) and len(est):
@@ -111,30 +120,48 @@ def load_split(split, model, ck, kind, device, limit=None):
     data = []
     for f in files:
         with np.load(f) as d:
-            probs = predict_probs(model, ck, kind, _normalize(d["cqt"]), device)
-            data.append((probs, d["frame"], d["onset"]))
+            cqt = _normalize(d["cqt"])
+            if hasattr(model, "onset_head"):
+                probs, ons = predict_with_onsets(model, cqt, device)
+            else:
+                probs, ons = predict_probs(model, ck, kind, cqt, device), None
+            data.append((probs, ons, d["frame"], d["onset"]))
     return data
 
 
-def evaluate_split(data, thresholds=THRESHOLDS):
-    return {thr: aggregate([track_scores(p, fr, on, thr) for p, fr, on in data])
+def evaluate_split(data, thresholds=THRESHOLDS, onset_thr=None):
+    return {thr: aggregate([track_scores(p, o, fr, on, thr, onset_thr) for p, o, fr, on in data])
             for thr in thresholds}
 
 
 # ----------------------------------------------------------------- ana akış
-def main(kind, ckpt, splits, select_split, limit=None):
+def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None):
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
-    print(f"Model: {kind} ({ckpt or 'varsayilan'}) | cihaz: {device}")
+    has_on = hasattr(model, "onset_head")
+    if not has_on or (onset_thr is not None and onset_thr < 0):
+        on_grid = [None]                                  # eski kare-esik cozumlemesi
+    elif onset_thr is not None:
+        on_grid = [onset_thr]                             # kullanici sabitledi
+    else:                                                 # dogrulamada nota F1 ile sec
+        on_grid = sorted({ck.get("onset_thr") or 0.5, 0.1, 0.2, 0.3, 0.5})
+    print(f"Model: {kind} ({ckpt or 'varsayilan'}) | cihaz: {device} | cozumleme: "
+          f"{'kare-esik' if on_grid == [None] else 'onset, esik adaylari ' + str(on_grid)}")
 
-    sel = evaluate_split(load_split(select_split, model, ck, kind, device, limit))
-    thr = max(sel, key=lambda t: sel[t]["note"][2])
-    print(f"\nEsik secimi '{select_split}' uzerinde (nota F1): esik={thr} "
-          f"(nota F1 {sel[thr]['note'][2]:.3f})")
+    sel_data = load_split(select_split, model, ck, kind, device, limit)
+    best = (-1, None, None)
+    for ot in on_grid:
+        sel = evaluate_split(sel_data, onset_thr=ot)
+        t = max(sel, key=lambda t: sel[t]["note"][2])
+        if sel[t]["note"][2] > best[0]:
+            best = (sel[t]["note"][2], t, ot)
+    _, thr, onset_thr = best
+    print(f"\nEsik secimi '{select_split}' uzerinde (nota F1): perde esigi={thr}"
+          + (f", onset esigi={onset_thr}" if onset_thr is not None else "") + f" (nota F1 {best[0]:.3f})")
 
     summary = []
     for split in splits:
-        res = evaluate_split(load_split(split, model, ck, kind, device, limit))
+        res = evaluate_split(load_split(split, model, ck, kind, device, limit), onset_thr=onset_thr)
         print(f"\n=== {split} ===")
         print(f"  {'esik':>5} | {'nota P':>7} {'R':>6} {'F1':>6} | {'kare P':>7} {'R':>6} {'F1':>6}")
         for t, r in res.items():
@@ -154,8 +181,10 @@ def main(kind, ckpt, splits, select_split, limit=None):
                          for g in ("1", "2", "3", "4+"))
         print(f"{split:<14}{r['note'][2]:>10.3f}{r['frame'][2]:>10.3f}   {pol}")
     print("=" * 66)
-    print(f"esik={thr} ('{select_split}' uzerinde secildi). Not: segment_notes ayni perdenin "
-          "art arda tekrarini tek nota sayar -> nota F1 icin alt sinir.")
+    print(f"esik={thr} ('{select_split}' uzerinde secildi).")
+    if onset_thr is None:
+        print("Not: kare-esik cozumlemesi ayni perdenin art arda tekrarini tek nota sayar "
+              "-> nota F1 icin alt sinir.")
 
 
 if __name__ == "__main__":
@@ -165,5 +194,7 @@ if __name__ == "__main__":
     ap.add_argument("--splits", nargs="+", default=["gaps_test", "val", "val_comp"])
     ap.add_argument("--select-split", default="val", help="esigin secildigi split (test OLMAMALI)")
     ap.add_argument("--limit", type=int, default=None, help="split basina en fazla kayit (hizli deneme)")
+    ap.add_argument("--onset-thr", type=float, default=None,
+                    help="onset esigi (bos = checkpoint'te dogrulamada secilen); -1 = eski kare-esik cozumlemesi")
     a = ap.parse_args()
-    main(a.model, a.ckpt, a.splits, a.select_split, a.limit)
+    main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr)

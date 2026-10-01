@@ -66,3 +66,33 @@ def build_tab_targets(notes_dict, n_frames: int,
 def tab_class_to_fret(c: int):
     """Sınıf -> fret (sessizse None)."""
     return None if c == 0 else c - 1
+
+
+def string_onsets(tab, onset_roll=None, instrument: Instrument = STANDARD_6, dilate: int = 2):
+    """
+    Katman 3.9 / Adım 1 — (T, S) tab etiketi -> (T, S) tel başına ONSET hedefi (0/1).
+    Bir telde yeni nota başlar:
+      (1) sınıf değiştiğinde (sessiz -> fret ya da fret -> başka fret), veya
+      (2) perde onset roll'u (önbellekteki 'onset', (T, P)) o telin o anki perdesinde
+          işaretliyse -> AYNI perdenin art arda yeniden çalınması da yakalanır.
+    dilate: işareti sonraki karelere de yayar (etiket yuvarlama kaymasına tolerans).
+    """
+    tab = np.asarray(tab)
+    T, S = tab.shape
+    on = np.zeros((T, S), np.uint8)
+    prev = np.vstack([np.zeros((1, S), tab.dtype), tab[:-1]])
+    on[(tab > 0) & (tab != prev)] = 1
+    if onset_roll is not None:
+        lo = instrument.pitch_range()[0]
+        for s in range(S):
+            act = np.nonzero(tab[:, s] > 0)[0]
+            p = instrument.tuning[s] + tab[act, s] - 1 - lo
+            ok = (p >= 0) & (p < onset_roll.shape[1])
+            hit = act[ok][onset_roll[act[ok], p[ok]] > 0]
+            on[hit, s] = 1
+    if dilate > 1:
+        base = on.copy()
+        for k in range(1, dilate):
+            on[k:] |= base[:-k]
+        on &= (tab > 0)                      # sessiz karede onset olmaz
+    return on

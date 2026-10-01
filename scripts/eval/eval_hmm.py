@@ -34,11 +34,11 @@ from gtab.core.instrument import STANDARD_6
 from gtab.core.note_event import NoteEvent, Transcription
 from gtab.data.torch_dataset import _normalize
 from gtab.decoding.decode import decode_with_margin, notes_to_frames
-from gtab.decoding.viterbi import pitch_matrix, segment_notes, viterbi_assign, transition_cost
+from gtab.decoding.viterbi import pitch_matrix, segment, viterbi_assign, transition_cost
 from gtab.decoding.transitions import (TransitionModel, notes_from_tab, build_lattice,
                                        decode_lattice)
 from gtab.evaluation.metrics import prf, tab_scores
-from gtab.models.inference import load_model, predict_probs
+from gtab.models.inference import load_model, predict_probs, predict_with_onsets
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import get_device
 
@@ -164,14 +164,14 @@ def _uniform_nll(seqs):
 
 
 # ----------------------------------------------------------------- 2) uçtan uca
-def end_to_end(tm, data, quick=False):
+def end_to_end(tm, data, quick=False, onset_thr=None):
     print("\n" + "=" * 64)
     print("2) UCTAN UCA - kare-seviye tab F1 (eval_viterbi ile ayni metrik)")
     print("=" * 64)
 
     def score(fn):
         tp = fp = fn_ = 0
-        for i, (probs, gt) in enumerate(data):
+        for i, (probs, gt, _) in enumerate(data):
             a, b, c = tab_scores(fn(i, probs, gt), gt)
             tp += a; fp += b; fn_ += c
         return prf(tp, fp, fn_)
@@ -189,9 +189,8 @@ def end_to_end(tm, data, quick=False):
     print(f"  {'esik':>5} {'w_tr':>5} {'P':>7} {'R':>7} {'F1':>7}")
     for thr in thresholds:
         segs_all, lats = [], []
-        for probs, gt in data:
-            pm, lo = pitch_matrix(probs, INSTR)
-            segs = segment_notes(pm, lo, thr)
+        for probs, gt, ons in data:
+            segs = segment(probs, ons, thr, onset_thr, INSTR)
             segs_all.append(segs)
             lats.append(build_lattice(segs, probs, tm, time_unit="frames"))
         for w in w_trs:
@@ -228,7 +227,13 @@ def end_to_end(tm, data, quick=False):
 
 
 # ----------------------------------------------------------------- ana akış
-def main(kind="crnn", quick=False, refit=False, ckpt=None):
+def _predict(model, ck, kind, cqt, device):
+    if hasattr(model, "onset_head"):
+        return predict_with_onsets(model, cqt, device)
+    return predict_probs(model, ck, kind, cqt, device), None
+
+
+def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None):
     tm = get_transition_model(refit)
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
@@ -238,24 +243,29 @@ def main(kind="crnn", quick=False, refit=False, ckpt=None):
     data, probs_list = [], []
     for f in val_files:
         with np.load(f) as d:
-            probs = predict_probs(model, ck, kind, _normalize(d["cqt"]), device)
-            data.append((probs, d["tab"].astype(np.int64)))
+            probs, ons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+            data.append((probs, d["tab"].astype(np.int64), ons))
         probs_list.append(probs)
     print(f"{len(data)} val kaydi islendi.")
 
     diagnose(tm, val_files, val_seqs, probs_list, quick)
-    end_to_end(tm, data, quick)
+    if onset_thr is None:
+        onset_thr = ck.get("onset_thr") or 0.5
+    use_on = onset_thr if (data[0][2] is not None and onset_thr >= 0) else None
+    print(f"\nUctan uca cozumleme: {'onset (esik ' + str(use_on) + ')' if use_on is not None else 'kare-esik'}")
+    end_to_end(tm, data, quick, use_on)
 
 
-def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None):
+def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onset_thr=None):
     from gtab.decoding.decode import render_ascii_tab
     tm = get_transition_model(False)
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     with np.load(npz_path) as d:
-        probs = predict_probs(model, ck, kind, _normalize(d["cqt"]), device)
-    pm, lo = pitch_matrix(probs, INSTR)
-    segs = segment_notes(pm, lo, threshold)
+        probs, ons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+    if onset_thr is None:
+        onset_thr = ck.get("onset_thr") or 0.5
+    segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR)
     asg = decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
     events = []
     for (a, b, pitch), (s, f) in zip(segs, asg):
@@ -277,8 +287,9 @@ if __name__ == "__main__":
     ap.add_argument("--threshold", type=float, default=0.8)
     ap.add_argument("--w-transition", type=float, default=1.0)
     ap.add_argument("--ckpt", default=None, help="model agirlik dosyasi (varsayilan: tabcnn.pt/tabcrnn.pt)")
+    ap.add_argument("--onset-thr", type=float, default=None, help="onset esigi (bos = checkpoint'teki); -1 = kare-esik cozumlemesi")
     args = ap.parse_args()
     if args.demo:
-        demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt)
+        demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr)
     else:
-        main(args.model, args.quick, args.refit, args.ckpt)
+        main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr)
