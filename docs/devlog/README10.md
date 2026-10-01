@@ -110,15 +110,42 @@ python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_onset_h.pt
 python -m scripts.eval.diagnose_strings --ckpt tabcrnn_onset_h.pt --splits val val_comp
 ```
 
-## Karşılaştırma tablosu (doldurulacak)
-| Model | GS solo tab F1 | oracle tel (solo) | GS val nota F1 | val_comp nota F1 | GAPS nota F1 | GAPS kare F1 |
+## Sonuçlar — Adım 1 ve 2 (1 Ekim 2026, tek seed)
+Eşikler GuitarSet val (solo) üzerinde seçildi; GAPS test yalnızca raporlama.
+
+| Model / çözümleme | GS solo tab F1 | oracle tel (solo) | GS val nota F1 | val_comp nota F1 | GAPS nota F1 | GAPS kare F1 |
 |---|---|---|---|---|---|---|
 | tabcrnn_gaps (taban) | 0.697 | 0.797 | 0.876 | 0.463 | 0.360 | 0.429 |
-| tabcrnn_onset — onset çözümleme | | | | | | |
-| tabcrnn_onset — eski çözümleme | | | | | | |
-| tabcrnn_onset_h | | | | | | |
+| tabcrnn_onset — eski çözümleme | — | — | 0.876 | 0.481 | 0.464 | 0.459 |
+| tabcrnn_onset — onset çözümleme | 0.728 (Viterbi w=0.25) | 0.818 | 0.898 | 0.699 | 0.463 | 0.314 |
+| **tabcrnn_onset_h** — onset çözümleme | **0.739** (greedy) | **0.850** | **0.909** | **0.724** | 0.407 | 0.222 |
+
+Yorum:
+- **Adım 1 (onset):** akorlarda nota F1 0.46 → 0.70. Aynı modelde eski çözümleme 0.48
+  veriyor → kazancın tamamına yakını onset'li çözümlemeden (tekrar eden notalar
+  ayrılıyor, hayalet notalar eleniyor; val_comp yanlış pozitifleri 26.0k → 18.7k).
+- **Adım 2 (harmonik istifleme):** tel tarafında asıl kazanç: oracle tel doğruluğu
+  0.818 → **0.850** (taban 0.797), solo tel hatası %15.5 → %12.4, e teli 0.82 → 0.92.
+  Öğrenilen önsel artık katkı vermiyor (ses tel bilgisini kendisi taşıyor).
+- **GAPS düşüşü bir KALİBRASYON sorunu:** GuitarSet solo'da seçilen eşik (perde 0.9,
+  onset 0.3) GAPS'e uymuyor. Aynı modelin GAPS'te daha düşük eşikteki skoru 0.588
+  (eşik 0.5). Bunu test setinde seçmek sızıntı olur → eşikler GAPS için GAPS'in
+  KENDİ doğrulama parçasında (gaps_train içindeki icracı-ayrık val) seçilmeli.
+  Onset modunda kare F1 notalardan türetildiği için GAPS'te onset kaçırılan
+  notalar kare recall'unu da düşürüyor (onset F1: GuitarSet 0.68, GAPS 0.44).
+- **Polifonide kalan darboğaz:** val_comp'ta perde bulunamayan hücreler hâlâ %23.5,
+  hayalet notalar yanlış pozitiflerin %75'i. Tel hatası %5 ile sorun değil.
+
+Ölçüt kontrolü (taban tabcrnn_gaps):
+| Ölçüt | Hedef | tabcrnn_onset_h | Durum |
+|---|---|---|---|
+| GS solo tab F1 | ≥ 0.72 | 0.739 | ✓ |
+| val_comp nota F1 | ≥ +0.10 | +0.261 | ✓ |
+| GAPS nota F1 | ≥ +0.05 | +0.047 (GuitarSet eşiğiyle) | kalibrasyon sonrası yeniden ölçülecek |
+| Hiçbir metrikte −0.01'den fazla kayıp yok | | GAPS kare F1 −0.21 | kalibrasyon sonrası yeniden ölçülecek |
 
 ## Durum
 - [x] Adım 0 — hata analizi
-- [x] Adım 1 — onset çıkışı: kod + testler (tam eğitim bekleniyor)
-- [x] Adım 2 — harmonik istifleme: kod + testler (tam eğitim bekleniyor)
+- [x] Adım 1 — onset çıkışı: tabcrnn_onset.pt
+- [x] Adım 2 — harmonik istifleme: tabcrnn_onset_h.pt (en iyi GuitarSet modeli)
+- [ ] GAPS eşiklerinin GAPS doğrulamasında seçilmesi (alan-içi kalibrasyon)
