@@ -228,7 +228,7 @@ def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
 
 
 def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
-                        min_frames=2, lookahead=2):
+                        min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -236,17 +236,32 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
       - Onset, perde 'lookahead' kare içinde aktifleşirse kabul edilir.
       - Nota, perde aktif kaldıkça sürer; AYNI perdede yeni onset gelirse biter ve
         yeni nota başlar (tekrar eden notalar artık birleşmez).
+    Katman 3.10 eklentileri (varsayılanlar = 3.9 davranışı, birebir):
+      - off_ratio  < 1: HİSTEREZİS. Nota 'threshold' ile başlar, threshold·off_ratio
+                       üstünde kaldıkça sürer -> sönümlenen kuyruk kesilmez.
+      - refractory > 0: aynı perdede önceki nota hâlâ sürerken 'refractory' kareden
+                       kısa sürede gelen yeni onset yok sayılır -> çift tetik hayaletleri.
+      - fallback   > 0: hiçbir notanın kapsamadığı, 'fallback' kare boyunca 'threshold'
+                       üstünde kalan perde onset'siz de nota sayılır -> onset kaçınca
+                       notanın tamamen düşmesi.
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
+    cont = pitch_mat > threshold * off_ratio if off_ratio < 1.0 else active
     on = onset_mat > onset_threshold
     T, P = active.shape
     starts = on & ~np.vstack([np.zeros((1, P), bool), on[:-1]])      # yükselen kenarlar
     notes = []
     for p in range(P):
-        st = np.nonzero(starts[:, p])[0]
-        if not len(st):
-            continue
+        st = list(np.nonzero(starts[:, p])[0])
+        if refractory > 0 and len(st) > 1:
+            kept = [st[0]]
+            for s_ in st[1:]:
+                if s_ - kept[-1] < refractory and cont[kept[-1]:s_ + 1, p].all():
+                    continue                      # önceki nota sürüyor: çift tetik
+                kept.append(s_)
+            st = kept
+        covered = np.zeros(T, bool) if fallback > 0 else None
         for k, s0 in enumerate(st):
             nxt = st[k + 1] if k + 1 < len(st) else T
             a = s0
@@ -255,22 +270,36 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
             if a >= nxt or a >= T or not active[a, p]:
                 continue
             b = a
-            while b < nxt and active[b, p]:
+            while b < nxt and cont[b, p]:
                 b += 1
             if b - s0 >= min_frames:
                 notes.append((int(s0), int(b), pitch_lo + p))
+                if covered is not None:
+                    covered[s0:b] = True
+        if fallback > 0:
+            t = 0
+            while t < T:
+                if active[t, p] and not covered[t]:
+                    s_ = t
+                    while t < T and cont[t, p] and not covered[t]:
+                        t += 1
+                    if t - s_ >= fallback:
+                        notes.append((int(s_), int(t), pitch_lo + p))
+                else:
+                    t += 1
     notes.sort(key=lambda n: (n[0], n[2]))
     return notes
 
 
 def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
-            instrument: Instrument = STANDARD_6, min_frames: int = 2):
+            instrument: Instrument = STANDARD_6, min_frames: int = 2, **dec):
     """
     Tek giriş noktası: model çıktısı -> [(start, end, pitch)].
     onsets None ise eski kare-eşik segmentasyonu (Katman 3.6), değilse onset tabanlı (3.9).
+    dec: segment_notes_onset'in Katman 3.10 parametreleri (off_ratio, refractory, fallback).
     """
     pm, lo = pitch_matrix(probs, instrument)
     if onsets is None or onset_threshold is None:
         return segment_notes(pm, lo, threshold, min_frames=min_frames)
     om = pitch_onset_matrix(probs, onsets, instrument)
-    return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames)
+    return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames, **dec)

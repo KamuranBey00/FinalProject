@@ -191,6 +191,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README8.md](docs/devlog/README8.md) — Katman 3.7 (veri genişletme: comp + çoğaltma)
 - [docs/devlog/README9.md](docs/devlog/README9.md) — Katman 3.8 (klasik gitar: GAPS + SynthTab yol haritası)
 - [docs/devlog/README10.md](docs/devlog/README10.md) — Katman 3.9 (tel/perde sesini öğrenmek: hata analizi, onset, harmonik istifleme)
+- [docs/devlog/README11.md](docs/devlog/README11.md) — Katman 3.10 (polifonide perde: hayalet notalar ve kaçan perdeler)
 
 ## Yol haritası
 
@@ -202,8 +203,10 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [x] Katman 3.6–3.7 — Tel ataması (Viterbi / öğrenilen önsel) + veri genişletme (comp)
 - [ ] Katman 3.8 — Klasik gitar alan uyarlaması: GAPS + SynthTab nylon
       (sunum Phase 3–4; bkz. [docs/devlog/README9.md](docs/devlog/README9.md))
-- [ ] Katman 3.9 — Tel/perde sesini öğrenmek: onset + harmonik istifleme
-      (polifoniye hazırlık; bkz. [docs/devlog/README10.md](docs/devlog/README10.md))
+- [x] Katman 3.9 — Tel/perde sesini öğrenmek: onset + harmonik istifleme
+      (bkz. [docs/devlog/README10.md](docs/devlog/README10.md))
+- [ ] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
+      (bkz. [docs/devlog/README11.md](docs/devlog/README11.md))
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

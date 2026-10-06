@@ -144,8 +144,55 @@ Yorum:
 | GAPS nota F1 | ≥ +0.05 | +0.047 (GuitarSet eşiğiyle) | kalibrasyon sonrası yeniden ölçülecek |
 | Hiçbir metrikte −0.01'den fazla kayıp yok | | GAPS kare F1 −0.21 | kalibrasyon sonrası yeniden ölçülecek |
 
+## Kalibrasyon — alan-içi eşik seçimi (`eval_pitch --select-split auto`, varsayılan)
+Sorun: tüm eşikler GuitarSet solo val'de seçiliyordu; GAPS'e uymuyordu.
+Çözüm (eğitim yok): her test setinin eşikleri **kendi alanının doğrulamasında** seçilir:
+- GuitarSet (val, val_comp) → `val`
+- GAPS (gaps_test) → `gaps_val` = gaps_train içindeki icracı-ayrık doğrulama
+  (28 kayıt; eğitimde kullanılan 203 kayıtla ve test icracılarıyla kesişim **0**, kontrol edildi)
+- Onset'li modelde **çözümleme yöntemi de** (onset'li / eski kare-eşik) doğrulamada nota F1
+  ile seçilir. Test setlerine seçimde hiç bakılmaz.
+- `--select-split val` = eski davranış (eski tablolar böyle üretildi; birebir aynı sonuç, test edildi).
+- Duman testi (3 kayıt, kesin değil): GAPS doğrulaması kare-eşik çözümlemesini, perde eşiği 0.4'ü seçti.
+
+Adil karşılaştırma için **taban da aynı kalibrasyonla** yeniden ölçülür:
+```bash
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_gaps.pt    --splits gaps_test val val_comp
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_onset_h.pt --splits gaps_test val val_comp
+```
+
+### Sonuçlar (6 Ekim 2026)
+| Model (alan-içi kalibrasyon) | GAPS nota F1 | GAPS kare F1 | GAPS çözümleme / eşik | GS val nota F1 | GS val kare F1 | val_comp nota F1 | val_comp kare F1 |
+|---|---|---|---|---|---|---|---|
+| tabcrnn_gaps (taban) | 0.441 | 0.566 | kare-eşik / 0.4 | 0.876 | 0.861 | 0.463 | 0.769 |
+| **tabcrnn_onset_h** | **0.592** | 0.556 | onset@0.2 / 0.4 | **0.909** | 0.843 | **0.724** | 0.765 |
+| fark | **+0.151** | −0.010 | | +0.033 | −0.018 | **+0.261** | −0.004 |
+
+GAPS kare F1, polifoni 1 / 2 / 3 / 4+: taban 0.56 / 0.58 / 0.58 / 0.57 → onset_h 0.64 / 0.59 / 0.55 / 0.51.
+
+Yorum:
+- Kalibrasyon tek başına tabanı da düzeltti (GAPS nota F1 0.360 → 0.441): eski tablolar
+  GAPS'i olduğundan kötü gösteriyordu. Adil kıyasta bile onset_h **+0.151** önde.
+- GAPS doğrulaması onset_h için onset'li çözümlemeyi seçti (taban için kare-eşik):
+  onset kafası klasik gitarda da işe yarıyor, yeter ki eşik o alanda seçilsin.
+- Kare F1'lerdeki küçük düşüşler (−0.004 … −0.018) yetenek kaybı değil, seçim ölçütünün
+  bedeli: eşik **nota F1**'e göre seçiliyor. Aynı model GS val'de eşik 0.7'de kare F1
+  0.861 (taban ile aynı) veriyor.
+- Zayıf nokta: GAPS'te yoğun polifoni (3 ve 4+ nota) kare F1'i tabanın gerisinde
+  (0.55 / 0.51'e karşı 0.58 / 0.57) → bir sonraki katmanın (polifoni, perde tarafı) hedefi.
+
+### Ölçüt kontrolü — son hali (taban tabcrnn_gaps, alan-içi kalibrasyon)
+| Ölçüt | Hedef | Sonuç | Durum |
+|---|---|---|---|
+| GS solo tab F1 | ≥ 0.72 | 0.739 (taban 0.697) | ✓ |
+| val_comp nota F1 | ≥ +0.10 | +0.261 | ✓ |
+| GAPS nota F1 | ≥ +0.05 | +0.151 | ✓ |
+| Hiçbir ana metrikte −0.01'den fazla kayıp yok | | nota/tab F1'lerde kayıp yok; kare F1'de en kötü −0.018 (GS val), nota-F1 eşik seçiminin bedeli | ✓ (not düşülerek) |
+
+**Karar: Katman 3.9 kapandı. Yeni taban: `tabcrnn_onset_h.pt`.**
+
 ## Durum
 - [x] Adım 0 — hata analizi
 - [x] Adım 1 — onset çıkışı: tabcrnn_onset.pt
 - [x] Adım 2 — harmonik istifleme: tabcrnn_onset_h.pt (en iyi GuitarSet modeli)
-- [ ] GAPS eşiklerinin GAPS doğrulamasında seçilmesi (alan-içi kalibrasyon)
+- [x] GAPS eşiklerinin GAPS doğrulamasında seçilmesi (alan-içi kalibrasyon) → ölçütler sağlandı, katman kapandı

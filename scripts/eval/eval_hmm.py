@@ -164,7 +164,7 @@ def _uniform_nll(seqs):
 
 
 # ----------------------------------------------------------------- 2) uçtan uca
-def end_to_end(tm, data, quick=False, onset_thr=None):
+def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
     print("\n" + "=" * 64)
     print("2) UCTAN UCA - kare-seviye tab F1 (eval_viterbi ile ayni metrik)")
     print("=" * 64)
@@ -190,7 +190,7 @@ def end_to_end(tm, data, quick=False, onset_thr=None):
     for thr in thresholds:
         segs_all, lats = [], []
         for probs, gt, ons in data:
-            segs = segment(probs, ons, thr, onset_thr, INSTR)
+            segs = segment(probs, ons, thr, onset_thr, INSTR, **(dec or {}))
             segs_all.append(segs)
             lats.append(build_lattice(segs, probs, tm, time_unit="frames"))
         for w in w_trs:
@@ -233,7 +233,7 @@ def _predict(model, ck, kind, cqt, device):
     return predict_probs(model, ck, kind, cqt, device), None
 
 
-def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None):
+def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None, dec=None):
     tm = get_transition_model(refit)
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
@@ -253,10 +253,12 @@ def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None):
         onset_thr = ck.get("onset_thr") or 0.5
     use_on = onset_thr if (data[0][2] is not None and onset_thr >= 0) else None
     print(f"\nUctan uca cozumleme: {'onset (esik ' + str(use_on) + ')' if use_on is not None else 'kare-esik'}")
-    end_to_end(tm, data, quick, use_on)
+    if use_on is not None and dec:
+        print(f"Katman 3.10 cozumleme kurallari: {dec}")
+    end_to_end(tm, data, quick, use_on, dec)
 
 
-def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onset_thr=None):
+def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onset_thr=None, dec=None):
     from gtab.decoding.decode import render_ascii_tab
     tm = get_transition_model(False)
     device = get_device()
@@ -265,7 +267,7 @@ def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onse
         probs, ons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
     if onset_thr is None:
         onset_thr = ck.get("onset_thr") or 0.5
-    segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR)
+    segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR, **(dec or {}))
     asg = decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
     events = []
     for (a, b, pitch), (s, f) in zip(segs, asg):
@@ -288,8 +290,13 @@ if __name__ == "__main__":
     ap.add_argument("--w-transition", type=float, default=1.0)
     ap.add_argument("--ckpt", default=None, help="model agirlik dosyasi (varsayilan: tabcnn.pt/tabcrnn.pt)")
     ap.add_argument("--onset-thr", type=float, default=None, help="onset esigi (bos = checkpoint'teki); -1 = kare-esik cozumlemesi")
+    ap.add_argument("--off-ratio", type=float, default=1.0, help="Katman 3.10 histerezis (eval_pitch'in sectigi deger)")
+    ap.add_argument("--refractory", type=int, default=0, help="Katman 3.10 refrakter pencere (kare)")
+    ap.add_argument("--fallback", type=int, default=0, help="Katman 3.10 onset'siz yedek nota (kare)")
     args = ap.parse_args()
     if args.demo:
-        demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback)
+        demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
-        main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback)
+        main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)
