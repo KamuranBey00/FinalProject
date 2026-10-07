@@ -5,6 +5,7 @@ Model yükleme ve çıkarım (tüm değerlendirme script'lerinin ortak noktası)
 - predict_probs: normalize CQT (T, n_bins) -> (T, S, ncls) softmax
                  CNN: batch'li pencere çıkarımı; CRNN: uzun kayıtlarda parça parça
 - predict_with_onsets: onset kafalı CRNN -> (tab olasılıkları, (T, S) onset olasılıkları)
+- predict_heads      : + offset kafası (Katman 3.10 Adım 3c) -> (tab, onset | None, offset | None)
 
 Checkpoint'te "onset": True varsa 'crnn' türü otomatik olarak TabCRNNOnset kurar
 (forward() yine tab döndürür -> eski değerlendirme kodu değişmeden çalışır).
@@ -26,8 +27,11 @@ def load_model(kind, device, ckpt=None, instrument=STANDARD_6):
     path = ckpt_path(ckpt or DEFAULT_CKPT[kind])
     ck = torch.load(path, map_location=device)
     if kind == "crnn":
-        cls = TabCRNNOnset if ck.get("onset") else TabCRNN
-        m = cls(instrument.num_strings, ck["n_classes"], harmonics=ck.get("harmonics")).to(device)
+        if ck.get("onset"):
+            m = TabCRNNOnset(instrument.num_strings, ck["n_classes"], harmonics=ck.get("harmonics"),
+                             offset=bool(ck.get("offset"))).to(device)
+        else:
+            m = TabCRNN(instrument.num_strings, ck["n_classes"], harmonics=ck.get("harmonics")).to(device)
     else:
         m = TabCNN(instrument.num_strings, ck["n_classes"], ck["context"]).to(device)
     m.load_state_dict(ck["model"]); m.eval()
@@ -61,6 +65,20 @@ def predict_with_onsets(model, cqt, device):
         return torch.softmax(tab, -1), torch.sigmoid(on)
     tab, on = _chunked(both, cqt, device)
     return tab, on
+
+
+def predict_heads(model, cqt, device):
+    """
+    Katman 3.10 Adım 3c — tüm kafalar: (tab softmax (T,S,C), onset (T,S) | None, offset (T,S) | None).
+    Offset kafası yoksa predict_with_onsets ile birebir aynı.
+    """
+    if getattr(model, "offset_head", None) is None:
+        tab, on = predict_with_onsets(model, cqt, device)
+        return tab, on, None
+    def allh(x):
+        tab, on, off = model.forward_all(x)
+        return torch.softmax(tab, -1), torch.sigmoid(on), torch.sigmoid(off)
+    return tuple(_chunked(allh, cqt, device))
 
 
 def predict_probs(model, ck, kind, cqt, device, batch=1024, chunk=2000, ctx=100):

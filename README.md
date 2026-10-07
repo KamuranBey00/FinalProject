@@ -206,7 +206,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [x] Katman 3.9 — Tel/perde sesini öğrenmek: onset + harmonik istifleme
       (bkz. [docs/devlog/README10.md](docs/devlog/README10.md))
 - [ ] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
-      (bkz. [docs/devlog/README11.md](docs/devlog/README11.md))
+      (bkz. [docs/devlog/README11.md](docs/devlog/README11.md)) — fingerstyle (GAPS) ölçütü sağlandı,
+      tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik, kapanış kararı bekleniyor
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

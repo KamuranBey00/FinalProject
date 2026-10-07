@@ -29,8 +29,9 @@ python -m scripts.data.get_gaps --splits train test   # klasik gitar (GAPS, ~15 
 python -m scripts.data.build_gaps --disjoint
 
 # En iyi modelle bir kayıttan TAB üret
-python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_onset_h.pt \
-    --demo data/cache/val/05_Rock1-130-A_solo.npz --threshold 0.8 --w-transition 0
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_rep_off.pt \
+    --demo data/cache/val/05_Rock1-130-A_solo.npz --threshold 0.7 --w-transition 0 \
+    --onset-thr 0.2 --refractory 6 --fallback 10 --peak --reattack 0.4 --rise-keep 6 --offset-thr 0.5
 ```
 Tüm komutlar **proje kökünden** `python -m` ile çalışır. `--ckpt` argümanına çıplak
 dosya adı verilirse `checkpoints/` altında aranır.
@@ -111,6 +112,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `eval/diagnose_strings.py` | Hata analizi: kayıp nereden geliyor, hangi teller karışıyor |
 | `eval/diagnose_pitch.py` | Katman 3.10: kaçan/hayalet notaların nedeni, süre/register/polifoni kırılımı |
 | `eval/check_gaps_labels.py` | Katman 3.10: GAPS `.match` eşleşme oranı ile model hatası ilişkisi |
+| `eval/diagnose_onset_features.py` | Katman 3.10 Adım 3c-0: hızlı tekrarları hangi giriş özelliği ayırır (CQT / kısa pencere STFT; model yok) |
 
 ### `checkpoints/`
 | Dosya | Katman | Not |
@@ -120,7 +122,8 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `tabcrnn_gaps.pt` | 3.8 | + GAPS ince ayarı |
 | `tabcrnn_onset.pt` | 3.9 | + onset kafası |
 | **`tabcrnn_onset_h.pt`** | 3.9 | Katman 3.9 tabanı: + harmonik istifleme (GS tab F1 0.743, kurallar + mix) |
-| `tabcrnn_poly.pt` | 3.10 | + keskin onset, GuitarSet perde kaybı, kısa nota ağırlığı (akorlarda +0.014/+0.017; tab F1 ölçümü bekleniyor) |
+| `tabcrnn_poly.pt` | 3.10 | + keskin onset, GuitarSet perde kaybı, kısa nota ağırlığı (tab F1 0.749 / 0.753) |
+| **`tabcrnn_rep_off.pt`** | 3.10 | **Güncel taban:** + offset kafası, hızlı tekrar onset ağırlığı, GAPS perde ağırlığı ×2 (tab F1 0.760, GAPS nota/kare 0.689/0.675) |
 | `transitions.npz` | 3.6b | öğrenilen tel geçiş modeli |
 
 ## Çalışma kuralları

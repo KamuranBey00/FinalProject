@@ -34,7 +34,8 @@ from gtab.utils import get_device
 
 
 # ----------------------------------------------------------------- ana akış
-def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_search=True, criterion="note"):
+def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_search=True, criterion="note",
+         force_rise=None):
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -58,6 +59,8 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
                   f"{'kare-esik' if o is None else f'onset@{o}'}"
                   + (f", histerezis={dec['off_ratio']}, refrakter={dec['refractory']}, yedek={dec['fallback']}"
                      f", tepe={dec.get('peak', False)}, yeniden_vurus={dec.get('reattack', 0.0)}"
+                     f", enerji_kabul={dec.get('rise_keep', 0.0)}, enerji_bol={dec.get('rise_split', 0.0)}"
+                     f", offset={dec.get('offset_threshold', 0.0)}"
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
         return cal[sp]
 
@@ -65,6 +68,10 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
     for split in splits:
         sp = selection_split(split, select_split)
         _, thr, ot, dec = get_cal(sp)
+        if force_rise is not None and ot is not None:   # ablasyon: enerji kurallarını sabitle
+            dec = dict(dec, rise_keep=force_rise[0], rise_split=force_rise[1])
+            print(f"  [{split}] ABLASYON: enerji_kabul={force_rise[0]}, enerji_bol={force_rise[1]} sabitlendi "
+                  f"(digerleri '{sp}' secimi)")
         res = evaluate_split(load_split(split, model, ck, kind, device, limit), onset_thr=ot, dec=dec)
         print(f"\n=== {split}  (esikler '{sp}' uzerinde secildi; cozumleme: "
               f"{'kare-esik' if ot is None else f'onset@{ot}'}) ===")
@@ -104,7 +111,10 @@ if __name__ == "__main__":
                     help="Katman 3.10 cozumleme kurallarini (histerezis/refrakter/yedek) arama; 3.9 davranisi")
     ap.add_argument("--onset-thr", type=float, default=None,
                     help="onset esigi (bos = checkpoint'te dogrulamada secilen); -1 = eski kare-esik cozumlemesi")
+    ap.add_argument("--force-rise", type=float, nargs=2, default=None, metavar=("KABUL_DB", "BOL_DB"),
+                    help="ablasyon: enerji kurallarini tum splitlerde bu degerlere sabitle (or. 4 6)")
     ap.add_argument("--criterion", default="note", choices=["note", "mix"],
                     help="esik secim olcutu: note = nota F1 (3.9); mix = (nota F1 + kare F1)/2")
     a = ap.parse_args()
-    main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr, not a.no_dec_search, a.criterion)
+    main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr, not a.no_dec_search, a.criterion,
+         a.force_rise)

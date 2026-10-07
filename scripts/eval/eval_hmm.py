@@ -34,11 +34,11 @@ from gtab.core.instrument import STANDARD_6
 from gtab.core.note_event import NoteEvent, Transcription
 from gtab.data.torch_dataset import _normalize
 from gtab.decoding.decode import decode_with_margin, notes_to_frames
-from gtab.decoding.viterbi import pitch_matrix, segment, viterbi_assign, transition_cost
+from gtab.decoding.viterbi import energy_rise, pitch_matrix, segment, viterbi_assign, transition_cost
 from gtab.decoding.transitions import (TransitionModel, notes_from_tab, build_lattice,
                                        decode_lattice)
 from gtab.evaluation.metrics import prf, tab_scores
-from gtab.models.inference import load_model, predict_probs, predict_with_onsets
+from gtab.models.inference import load_model, predict_probs, predict_heads
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import get_device
 
@@ -171,7 +171,7 @@ def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
 
     def score(fn):
         tp = fp = fn_ = 0
-        for i, (probs, gt, _) in enumerate(data):
+        for i, (probs, gt, *_) in enumerate(data):
             a, b, c = tab_scores(fn(i, probs, gt), gt)
             tp += a; fp += b; fn_ += c
         return prf(tp, fp, fn_)
@@ -189,8 +189,8 @@ def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
     print(f"  {'esik':>5} {'w_tr':>5} {'P':>7} {'R':>7} {'F1':>7}")
     for thr in thresholds:
         segs_all, lats = [], []
-        for probs, gt, ons in data:
-            segs = segment(probs, ons, thr, onset_thr, INSTR, **(dec or {}))
+        for probs, gt, ons, rise, offs in data:
+            segs = segment(probs, ons, thr, onset_thr, INSTR, rise=rise, offsets=offs, **(dec or {}))
             segs_all.append(segs)
             lats.append(build_lattice(segs, probs, tm, time_unit="frames"))
         for w in w_trs:
@@ -229,8 +229,8 @@ def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
 # ----------------------------------------------------------------- ana akış
 def _predict(model, ck, kind, cqt, device):
     if hasattr(model, "onset_head"):
-        return predict_with_onsets(model, cqt, device)
-    return predict_probs(model, ck, kind, cqt, device), None
+        return predict_heads(model, cqt, device)
+    return predict_probs(model, ck, kind, cqt, device), None, None
 
 
 def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None, dec=None):
@@ -243,8 +243,8 @@ def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None, dec=N
     data, probs_list = [], []
     for f in val_files:
         with np.load(f) as d:
-            probs, ons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
-            data.append((probs, d["tab"].astype(np.int64), ons))
+            probs, ons, offs = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+            data.append((probs, d["tab"].astype(np.int64), ons, energy_rise(d["cqt"], INSTR), offs))
         probs_list.append(probs)
     print(f"{len(data)} val kaydi islendi.")
 
@@ -264,10 +264,12 @@ def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onse
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     with np.load(npz_path) as d:
-        probs, ons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+        probs, ons, offs = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+        rise = energy_rise(d["cqt"], INSTR)
     if onset_thr is None:
         onset_thr = ck.get("onset_thr") or 0.5
-    segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR, **(dec or {}))
+    segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR, rise=rise,
+                   offsets=offs, **(dec or {}))
     asg = decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
     events = []
     for (a, b, pitch), (s, f) in zip(segs, asg):
@@ -294,11 +296,18 @@ if __name__ == "__main__":
     ap.add_argument("--refractory", type=int, default=0, help="Katman 3.10 refrakter pencere (kare)")
     ap.add_argument("--peak", action="store_true", help="Katman 3.10 Adim 2: notayi onset tepe noktasindan baslat")
     ap.add_argument("--reattack", type=float, default=0.0, help="Katman 3.10 Adim 3b: nota surerken yeniden vurus icin onset tepe esigi (0 = kapali)")
+    ap.add_argument("--rise-keep", type=float, default=0.0, help="Adim 3 rev.: ses kesilmeden yeniden vurus icin enerji yukselisi esigi (dB)")
+    ap.add_argument("--rise-split", type=float, default=0.0, help="Adim 3 rev.: gomulu tekrari enerji kanitiyla ayirma esigi (dB)")
     ap.add_argument("--fallback", type=int, default=0, help="Katman 3.10 onset'siz yedek nota (kare)")
+    ap.add_argument("--offset-thr", type=float, default=0.0, help="Adim 3c: offset kafasi esigi (0 = kapali)")
     args = ap.parse_args()
     if args.demo:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
+                   rise_keep=args.rise_keep, rise_split=args.rise_split,
+                   offset_threshold=args.offset_thr)
         demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
+                   rise_keep=args.rise_keep, rise_split=args.rise_split,
+                   offset_threshold=args.offset_thr)
         main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)

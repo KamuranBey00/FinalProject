@@ -126,3 +126,27 @@ def short_note_weights(tab, onset_mask, short_frames=5, short_weight=2.0):
             else:
                 t += 1
     return w
+
+
+def repeat_onset_weights(lab, on_mask, gap=3, weight=3.0, span=2):
+    """
+    Katman 3.10 Adım 3c — (T, K) onset kaybı ağırlığı: HIZLI AYNI PERDE TEKRARLARI.
+    lab: (T, K) etiket (tel sınıfı ya da 0/1 perde roll'u), on_mask: (T, K) onset (0/1).
+    Bir onset, aynı değer önceki notada ses kesilmeden ya da en çok 'gap' kare boşlukla
+    çalıyorsa "tekrar"dır (ölçüm: GAPS'te <100 ms tekrarların %76'sı kaçıyor).
+    Tekrar onset'inin karesi ve sonraki span-1 kare 'weight' alır, diğerleri 1.
+    """
+    lab = np.asarray(lab); T, K = lab.shape
+    rep = np.zeros((T, K), bool)
+    for j in range(1, gap + 2):                 # j=1: ses kesilmeden, j>1: j-1 kare boşluk
+        if j >= T:
+            break
+        prev = np.zeros_like(lab); prev[j:] = lab[:-j]
+        rep |= prev == lab
+    rep &= (np.asarray(on_mask) > 0) & (lab > 0)
+    m = rep.copy()
+    for k in range(1, span):
+        m[k:] |= rep[:-k]
+    w = np.ones((T, K), np.float32)
+    w[m & (lab > 0)] = weight
+    return w

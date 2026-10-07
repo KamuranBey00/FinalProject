@@ -19,9 +19,9 @@ from gtab.config import FRAME_RATE
 from gtab.core.instrument import STANDARD_6
 from gtab.data.gaps import gaps_files
 from gtab.data.torch_dataset import _normalize
-from gtab.decoding.viterbi import pitch_matrix, segment
+from gtab.decoding.viterbi import energy_rise, pitch_matrix, segment
 from gtab.evaluation.metrics import prf
-from gtab.models.inference import predict_probs, predict_with_onsets
+from gtab.models.inference import predict_probs, predict_heads
 from gtab.paths import CACHE_DIR
 
 INSTR = STANDARD_6
@@ -54,7 +54,7 @@ def to_mir(notes):
     return iv, hz
 
 
-def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None):
+def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=None, offs=None):
     """
     -> dict(frame tp/fp/fn, note tp-sayıları, polifoni grupları)
     ons (T,S) verilirse (onset kafalı model) notalar onset ile başlatılır ve kare
@@ -63,7 +63,9 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None):
     pm, lo = pitch_matrix(probs, INSTR)
     n = min(len(pm), len(frame))
     frame, onset = frame[:n] > 0, onset[:n] > 0
-    est = segment(probs[:n], None if ons is None else ons[:n], thr, onset_thr, INSTR, **(dec or {}))
+    est = segment(probs[:n], None if ons is None else ons[:n], thr, onset_thr, INSTR,
+                  rise=None if rise is None else rise[:n], offsets=None if offs is None else offs[:n],
+                  **(dec or {}))
     if ons is None or onset_thr is None:
         pred = pm[:n] > thr
     else:
@@ -119,15 +121,17 @@ def load_split(split, model, ck, kind, device, limit=None):
         with np.load(f) as d:
             cqt = _normalize(d["cqt"])
             if hasattr(model, "onset_head"):
-                probs, ons = predict_with_onsets(model, cqt, device)
+                probs, ons, offs = predict_heads(model, cqt, device)
             else:
-                probs, ons = predict_probs(model, ck, kind, cqt, device), None
-            data.append((probs, ons, d["frame"], d["onset"]))
+                probs, ons, offs = predict_probs(model, ck, kind, cqt, device), None, None
+            # 5. öğe: perde başına CQT enerji yükselişi (Adım 3 revizyonu); 6.: tel offset'i (Adım 3c)
+            data.append((probs, ons, d["frame"], d["onset"], energy_rise(d["cqt"], INSTR), offs))
     return data
 
 
 def evaluate_split(data, thresholds=THRESHOLDS, onset_thr=None, dec=None):
-    return {thr: aggregate([track_scores(p, o, fr, on, thr, onset_thr, dec) for p, o, fr, on in data])
+    return {thr: aggregate([track_scores(p, o, fr, on, thr, onset_thr, dec, *rest)
+                            for p, o, fr, on, *rest in data])
             for thr in thresholds}
 
 
@@ -145,6 +149,12 @@ NO_DEC = dict(off_ratio=1.0, refractory=0, fallback=0)          # = Katman 3.9 d
 # Adım 2: kurallar seçildikten sonra "onset tepe noktasından başlat" ayrıca denenir
 # Adım 3b: ardından "nota sürerken yeniden vuruş" için onset tepe eşiği
 REATTACK_GRID = (0.3, 0.4, 0.5, 0.6, 0.7)
+# Adım 3 revizyonu: enerji yükselişi kanıtı (dB); refrakter bu aşamada 0'a da çekilebilir
+RISE_GRID = [dict(rise_keep=k, rise_split=sp, refractory=r)
+             for k in (0.0, 3.0, 6.0) for sp in (0.0, 4.0, 8.0) for r in (None, 0)
+             if (k, sp, r) != (0.0, 0.0, None)]
+# Adım 3c: offset kafası varsa nota bitişi için offset eşiği (0 = kapalı)
+OFFSET_GRID = (0.3, 0.5, 0.7)
 
 
 def score(r, criterion="note"):
@@ -196,6 +206,23 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note"):
             sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
             if score(sel[t0], criterion) > best_on[0]:
                 best_on = (score(sel[t0], criterion), t0, o0, dec)
+        # enerji kanıtı + refrakteri kaldırma (hızlı tekrarlar)
+        f0, t0, o0, d0 = best_on
+        for g in RISE_GRID:
+            dec = dict(d0, rise_keep=g["rise_keep"], rise_split=g["rise_split"])
+            if g["refractory"] is not None:
+                dec["refractory"] = g["refractory"]
+            sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
+            if score(sel[t0], criterion) > best_on[0]:
+                best_on = (score(sel[t0], criterion), t0, o0, dec)
+        # offset kafası (Adım 3c): yalnızca model offset veriyorsa
+        if len(data[0]) > 5 and data[0][5] is not None:
+            f0, t0, o0, d0 = best_on
+            for oft in OFFSET_GRID:
+                dec = dict(d0, offset_threshold=oft)
+                sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
+                if score(sel[t0], criterion) > best_on[0]:
+                    best_on = (score(sel[t0], criterion), t0, o0, dec)
         if best_on[0] > best[0]:
             best = best_on
     return best

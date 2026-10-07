@@ -315,6 +315,214 @@ python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --off-ratio 
 Karşılaştırma tabanı (tabcrnn_poly, Adım 2 kuralları): GAPS 0.582/0.656, val_comp 0.744/0.817,
 GS val 0.905/0.869, GS tab F1 0.748 (greedy) / 0.753 (Viterbi).
 
+### Adım 3 revizyonu — hızlı aynı perde tekrarları (8 Ekim 2026)
+Kullanıcı gözlemi: hayaletler ve kaçan notalar çoğunlukla **aynı perdenin hızlı tekrarı**;
+önceki nota sönümlenmeden yenisi geliyor, kare kare bakan model bunu ayırmakta zorlanıyor.
+Etiketlerden ölçüm (eğitim yok; "hızlı tekrar" = aynı perde, önceki nota bittikten ≤3 kare sonra):
+
+| | GS solo | GS akor (val_comp) | gaps_val |
+|---|---|---|---|
+| notaların yüzde kaçı hızlı tekrar | %6.9 | **%38.4** | **%17.9** |
+| bunların arasında ses hiç kesilmeyen (boşluk 0) | %18 | %42 | **%48** |
+| vuruş aralığı <100 ms / 100–200 / ≥200 ms | %3 / %31 / %66 | %3 / %15 / %82 | **%13** / %20 / %67 |
+| ≤140 ms (= refrakter 6 kare) | %13 | %9 | **%24** |
+
+Sonuç: gözlem doğru ve büyük — akorlarda notaların üçte biri, GAPS'te beşte biri hızlı tekrar;
+yaklaşık yarısında önceki nota hiç susmuyor (sönüm + yeni vuruş üst üste).
+
+Adım 1–3 seçenekleriyle uyum kontrolü:
+| Seçenek | Bu sorunla ilişkisi |
+|---|---|
+| refrakter 6 (şu an **varsayılan**) | **ÇELİŞİYOR**: ≤140 ms gerçek tekrarları siliyor (GAPS'te tekrarların %24'ü) |
+| yeniden vuruş eşiği (3b) | **kısmen**: sahte bölünmeyi (fragman) azaltır ama sesi kesilmeyen gerçek tekrarı da birleştirebilir; tek başına riskli |
+| onset `pos_weight` 3 → 1 | **uyumsuz**: genel olarak az onset → hızlı tekrarlar daha çok kaçar |
+| offset (nota sonu) kafası | **uyumlu**: "önceki nota bitti / yeni nota başladı" sınırını açıkça öğretir |
+| tepe başlangıcı, histerezis | nötr |
+
+Revize plan:
+- **3a+ ölçüm (eğitim yok):** diagnose_pitch'e vuruş aralığı (IOI) kırılımı — hızlı tekrarlarda
+  kaçma oranı ve "önceki tahmin notasının içine gömülmüş tekrar" sayısı; refrakter=0 ile
+  karşılaştırma.
+- **3b+ çözümleme (eğitim yok):** tekrar kararını sabit pencere/eşik yerine **sesin kanıtına**
+  bağlamak: o perdenin (ve harmoniklerinin) CQT enerjisinde ani yükseliş (vuruş geçişi) varsa
+  yeni nota, yoksa aynı nota devam. Gerçek tekrar sönüm sürerken de enerji sıçraması üretir;
+  sahte bölünme üretmez. Refrakter, bu kanıtla değiştirilir. Eşikler doğrulamada seçilir.
+- **3c eğitim (3b yetmezse):** (1) tekrar vuruşu onset'lerine ek ağırlık (aynı perde zaten
+  çalarken gelen onset'ler — modelin en zor ve en az örneklenen durumu), (2) offset kafası
+  (sunum: "pitch + onset + offset"), (3) son çare: daha ince zaman çözünürlüğü (hop 512 → 256,
+  ~23 ms → ~12 ms; tüm önbelleklerin yeniden üretimi) — yalnızca <100 ms tekrarlar
+  (GAPS %13, tremolo) asıl kayıp çıkarsa.
+
+### Adım 3 revizyonu — uygulandı (8 Ekim 2026; tam ölçüm bekleniyor)
+**1. Ölçüm** — `diagnose_pitch` bölüm E: hızlı tekrarların IOI'ye göre kaçma oranı, önceki
+tahmin notasına gömülenler, CQT enerji yükselişinin ayırt ediciliği.
+Duman testi (tabcrnn_poly, Adım 2 çözümlemesi, 5'er kayıt — kesin değil):
+
+| | val_comp | gaps_val |
+|---|---|---|
+| hızlı tekrarların kaçma oranı | %22 | %37 (<100 ms: **%89**, 100–200: %54, ≥200: %30) |
+| kaçan tekrarlardan önceki notaya **gömülü** | %34 | %42 |
+| enerji yükselişi medyan: gömülü gerçek tekrar / süren notada | 8.0 / 0.3 dB | 6.2 / 1.3 dB |
+| ses kesilmeden yeniden vuruş: doğru / hayalet | 14.7 / 0.5 dB | 10.7 / 1.4 dB |
+| eşik 4 dB: gömülü tekrar yakalanır / süren notada yanlış alarm | 77% / 3% | 70% / 10% |
+| eşik 4 dB: yeniden vuruşta hayalet elenir / doğru elenir | **87% / 3%** | **78% / 11%** |
+
+→ Enerji kanıtı gerçek tekrarı sahte bölünmeden **güçlü biçimde ayırıyor**; sorun eğitimsiz
+çözülebilir görünüyor.
+
+**2. Çözümleme** — `energy_rise` (`gtab/decoding/viterbi.py`): perde başına temel + 2. + 3. harmonik
+CQT enerjisinin son 3 kareye göre yükselişi (dB). İki kural (varsayılan kapalı, eski davranış birebir):
+- `rise_keep`: aynı perde çalarken gelen onset, yükseliş ≥ eşik ise yeni nota (değilse nota sürer).
+- `rise_split`: süren notanın içinde onset zayıf olsa da (≥ onset eşiği/2) yükseliş ≥ eşik olan yerel
+  tepe yeni nota başlatır → gömülü hızlı tekrarlar.
+Kalibrasyonda (doğrulamada) kabul ∈ {0, 3, 6} dB × bölme ∈ {0, 4, 8} dB × refrakter ∈ {seçilen, 0} aranır.
+Birim testi ✓; kapalıyken sonuçlar birebir aynı ✓.
+Duman testi (3 kayıt): gaps_val enerji kurallarını seçti (kabul 6, bölme 8). GuitarSet **solo val**
+seçmedi — solo kayıtlarda hızlı tekrar yalnızca %7, kuralın faydası orada görünmüyor.
+Bu yüzden ablasyon seçeneği: `eval_pitch --force-rise KABUL BÖL` (diğer ayarlar doğrulamadan).
+3 kayıtta val_comp 0.793/0.827 → 0.801/0.834 (`--force-rise 4 6`).
+**Açık karar (kullanıcı):** GuitarSet polifonisi için ayrı bir seçim parçası (ör. val_comp'un yarısı)
+kullanılsın mı? Değerlendirme kuralı olduğu için kullanıcı onayı olmadan değiştirilmedi.
+
+### Çalıştırma
+```bash
+# 1 — ölçüm (doğrulama setleri)
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_poly.pt --splits val_comp gaps_val --criterion mix
+# 2 — kalibre çözümleme (enerji kuralları doğrulamada seçilir)
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_poly.pt --splits gaps_test val val_comp --criterion mix
+# 2 — GuitarSet ablasyonu (enerji kurallarını sabitle)
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_poly.pt --splits val val_comp --criterion mix --force-rise 4 6
+# tab F1 ([val] secim satırındaki değerlerle + enerji)
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --off-ratio <..> --refractory <..> --fallback <..> [--peak] --reattack <..> --rise-keep <..> --rise-split <..>
+```
+Karar kuralı: val_comp ve GAPS'te nota F1 artar, hızlı tekrarların kaçma oranı düşer ve GS tab F1
+≥ 0.743 kalırsa eğitime gerek yok. Katman çıkış ölçütü (taban C'ye göre): val_comp ≥ 0.780 / 0.830,
+GAPS ≥ 0.638 / 0.671 (nota / kare). Tutmazsa Adım 3c (eğitim: tekrar-onset ağırlığı + offset kafası).
+
+### Adım 3 (3b + revizyon) — tam ölçüm sonuçları (7 Ekim 2026)
+Seçimler: gaps_val → onset@0.1, eşik 0.4, histerezis 0.5, refrakter 6, yedek 10, yeniden_vuruş 0.3,
+enerji_kabul 6, enerji_böl 8. val → onset@0.2, eşik 0.7, histerezis 1.0, refrakter 6, yedek 10, tepe,
+yeniden_vuruş 0.4, enerji_kabul 6, enerji_böl 0 (GuitarSet solo val de enerji kabulünü seçti).
+
+| split (nota / kare F1) | taban C (onset_h) | Adım 2 (poly) | **Adım 3** | hedef |
+|---|---|---|---|---|
+| gaps_test | 0.588 / 0.641 | 0.582 / 0.656 | **0.668 / 0.657** | 0.638 / 0.671 |
+| val_comp | 0.730 / 0.800 | 0.744 / 0.817 | **0.773 / 0.817** | 0.780 / 0.830 |
+| GS val | 0.907 / 0.865 | 0.905 / 0.869 | **0.915 / 0.869** | kayıp yok |
+
+`--force-rise 4 6` ablasyonu: val_comp 0.775 / 0.817, val 0.914 / 0.869 → sabit eşik farkı gürültü içinde.
+
+Tanılama (diagnose_pitch, tam veri):
+- GAPS nota F1 +0.086 (hedef aşıldı); kare F1 değişmedi → çözümleme notaları ayırdı, kare düzeyi akustik modelin sınırı.
+- Yeniden vuruşta enerji ayrımı güçlü: doğru / hayalet medyan 11.4 / 2.0 dB (GAPS), 7.6 / 1.3 (val_comp).
+- Gömülü hızlı tekrarda ayrım zayıf: medyan yükseliş 3.6 dB (GAPS) / 3.2 (val_comp), süren nota 1.5 / 0.4 →
+  4 dB'de yakalanan %45 / %42, GAPS'te yanlış alarm %12. 3 karelik (~70 ms) pencere <100 ms tekrarları ayıramıyor.
+- GAPS hızlı tekrar kaçma oranı hâlâ %42 (tekrarsız %31); <100 ms %76, 100–200 ms %58.
+- GAPS kaçanların %45'i "perde hiç aktif değil", hayaletlerin %53'ü farklı perde → çözümlemeyle düzeltilemez.
+
+Karar: eğitimsiz kurallar kabul (yeni varsayılan çözümleme). Çıkış ölçütü kısmen: GAPS nota ✓, GAPS kare ✗,
+val_comp ✗ (−0.007 / −0.013). Kalan hata hızlı tekrar çözünürlüğü ve perde aktivasyonu → **Adım 3c (eğitim) gerekli**
+(GS tab F1 kontrolünden sonra).
+
+GS solo tab F1 (eval_hmm, enerji kurallarıyla): greedy **0.749**, Viterbi **0.751** (önce 0.748 / 0.753) →
+nötr, ≥ 0.743 ✓. Enerji kuralları varsayılan çözümlemeye alındı.
+
+### Adım 3c-1 — eğitim: hızlı tekrar onset ağırlığı + GAPS perde ağırlığı (7 Ekim 2026)
+Kullanıcı hedefi: solo fingerstyle (tek ve çok sesli), hızlı/yavaş art arda notaların ayrılması
+(ileride ritim). Bu yüzden ana ölçüt GAPS. Kalan iki hata eğitim gerektiriyor:
+1. Gömülü hızlı tekrarlar (GAPS kaçma %42; <100 ms %76) → model tekrar vuruşunda onset vermiyor.
+   **`--repeat-weight W`**: önceki aynı perde notası ses kesilmeden ya da ≤ `--repeat-gap` (3) kare
+   önce bittiyse onset karesi (+1 kare) kayıpta W ağırlık alır (GuitarSet tel onset'i + GAPS perde onset'i).
+   `gtab.data.tab_labels.repeat_onset_weights`.
+2. GAPS kaçanlarının %45'i "perde hiç aktif değil" → mevcut **`--pitch-weight 2`** (GAPS perde kaybı ×2).
+
+Yeni veri yok (GAPS + GuitarSet). Mimari değişmedi; `tabcrnn_poly.pt`'den ince ayar.
+
+Testler:
+- Birim: sürekli tekrar ve 2 kare boşluklu tekrar ağırlık alıyor, farklı perde almıyor.
+- Varsayılan (`--repeat-weight 1`): onset ağırlığı = eski kısa nota ağırlığı (GS), GAPS = 1 → Adım 2 eğitimiyle birebir.
+- Tekrar onset oranı: GS solo %6.8, val_comp %38.1, gaps_val %18.5 (etiket ölçümüyle aynı).
+- Uçtan uca 1 epoch duman eğitimi (küçük veri) hatasız.
+
+Not: 3c-1 tek başına eğitilmedi; offset kafasıyla birleştirildi (aşağıda).
+
+### Karar (7 Ekim): "kısa optimizasyonlar yerine kalıcı çözüm" — 3c-0 ölçümü
+Kullanıcı önerisi: doğrudan offset kafası + hop 256. Hop yalnızca örneklemeyi sıklaştırır; zamansal bulanıklığı
+CQT pencere uzunluğu belirler (Q≈34: E2 ~410 ms, E4 ~100 ms). Hipotez: kısa pencereli giriş kanalı hızlı
+tekrarları ayırır. **Önce ölçüldü** (`scripts/eval/diagnose_onset_features.py`, etiket tabanlı, model yok):
+gerçek tekrar onset'i vs süren nota karesi, perde başına enerji yükselişi.
+
+| özellik | GAPS AUC | @FA5% (<100 ms / pes) | val_comp AUC | @FA5% (<100 ms / pes) |
+|---|---|---|---|---|
+| mevcut CQT (k=3) | 0.889 | 54% (28% / 36%) | 0.893 | 62% (51% / 53%) |
+| CQT k=1 | 0.896 | 58% (36% / 31%) | 0.920 | 67% (55% / 50%) |
+| CQT filter_scale 0.5 | 0.886 | 51% (20% / 44%) | 0.895 | 63% (44% / 58%) |
+| STFT 1024 (46 ms) | 0.881 | 46% (17% / 35%) | 0.886 | 53% (34% / 51%) |
+| STFT 2048 (93 ms) | 0.890 | 55% (24% / 48%) | 0.891 | 59% (40% / 61%) |
+
+Sonuç: kısa pencere ayrımı **artırmıyor** (yalnız pes registerde küçük kazanç) → hipotez çürütüldü.
+Hop 256 ve ek giriş kanalı gerekçesiz (önbellek + tüm kurallar + yeniden eğitim maliyeti, kazanç kanıtı yok).
+El yapımı enerji özellikleri AUC ~0.89'da tıkanıyor; kalan ayrımı model öğrenmeli.
+→ **Tek birleşik eğitim (3c):** tekrar onset ağırlığı + GAPS perde ağırlığı + **offset kafası**
+(GAPS kare kaybının %56'sı notanın son %20'sinde; ritim katmanı için nota süresi gerekli).
+
+### Adım 3c — offset kafası (kod)
+- `TabCRNNOnset(offset=True)`: tel başına offset kafası (önsel bias), `forward_all` -> (tab, onset, offset).
+  `offset=False` iken modül yok -> eski checkpoint'ler birebir; checkpoint'e `"offset": True`.
+- Hedef: notanın son karesi (sınıf değişimi ya da sonraki karede yeni onset); `--onset-soft` ile önceki kare
+  soft; chunk'ın son karesi maskeli (`gtab.models.losses.string_offset_target`, `pitch_offset_target`).
+  GAPS'te perde offset'i noisy-OR (`pitch_onset_probs` ile aynı biçim).
+- `train_onset --offset-weight W` (0 = kafa yok, Adım 2/3c-1 birebir).
+- Çıkarım: `predict_heads` (offset yoksa `predict_with_onsets` ile aynı). Çözümleme: `offset_threshold`
+  (nota, offset olasılığı eşiği aştığı karede biter); kalibrasyonda {0.3, 0.5, 0.7} aranır;
+  `eval_hmm --offset-thr`, eval_pitch seçim satırında `offset=`.
+
+Testler: offset hedefi (tek nota, aynı perde tekrarı, dolgu sınırı) ✓; warm start: offset kafalı model
+tabcrnn_poly ile birebir aynı tab/onset çıktısı ✓; `predict_heads` = `predict_with_onsets` ✓; çözümleme
+offset=0 iken birebir, eşikle nota bölünüyor ✓; **regresyon**: HEAD (9ffe311) kodu ile aynı sonuç
+(tabcrnn_poly, `--no-dec-search --limit 3`: gaps_test 0.557/0.634, val 0.867/0.841) ✓; 1 epoch duman eğitimi
+(offset kaybı dahil) + eval_pitch (offset aşaması) + eval_hmm `--offset-thr` uçtan uca ✓.
+
+### Çalıştırma (3c, tek eğitim)
+```bash
+python -m scripts.train.train_onset --init tabcrnn_poly.pt --epochs 15 --ckpt tabcrnn_rep_off.pt --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0 --repeat-weight 3 --pitch-weight 2 --offset-weight 1
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_rep_off.pt --splits gaps_test val val_comp --criterion mix
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_rep_off.pt --splits gaps_val val_comp --criterion mix
+# tab F1: değerler eval_pitch çıktısındaki [val] secim satırından
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_rep_off.pt --onset-thr <..> --off-ratio <..> --refractory <..> --fallback <..> [--peak] --reattack <..> --rise-keep <..> --rise-split <..> --offset-thr <..>
+```
+Karar kuralı (taban = tabcrnn_poly + kurallar: GAPS 0.668 / 0.657, val_comp 0.773 / 0.817, GS val 0.915, tab F1 0.749):
+- Kabul: GAPS hızlı tekrar kaçma oranı belirgin düşer (%42 → ≤ %35) **ve** GAPS nota ya da kare F1 +0.02,
+  GS tab F1 ≥ 0.741.
+- Katman çıkışı: GAPS ≥ 0.638 / 0.671, val_comp ≥ 0.780 / 0.830 (nota / kare).
+
+### Adım 3c — sonuçlar (7 Ekim 2026, `tabcrnn_rep_off.pt`)
+Eğitim: 15 epoch, en iyi seçim skoru 0.564 (son epoch'lara doğru; aşırı öğrenme yok), offset kaybı 0.29 → 0.19.
+Seçim: gaps_val → onset@0.1, eşik 0.3, tepe, enerji 6/8, **offset 0 (seçilmedi)**; val → onset@0.2, eşik 0.7,
+enerji 6/0, **offset 0.5**.
+
+| nota / kare F1 | tabcrnn_poly + kurallar | **tabcrnn_rep_off** | hedef |
+|---|---|---|---|
+| gaps_test | 0.668 / 0.657 | **0.689 / 0.675** | 0.638 / 0.671 ✓ |
+| val_comp | 0.773 / 0.817 | 0.769 / 0.817 | 0.780 / 0.830 ✗ |
+| GS val | 0.915 / 0.869 | 0.915 / 0.871 | kayıp yok ✓ |
+| GS solo tab F1 (greedy / Viterbi) | 0.749 / 0.751 | **0.760 / 0.760** | ≥ 0.741 ✓ |
+| oracle tel doğruluğu | 0.854 | 0.862 | — |
+
+Tanılama (gaps_val / val_comp):
+- Hızlı tekrar kaçma oranı %42.0 → **%38.6** / %18.8 → %15.2 (hedef ≤ %35 sağlanmadı);
+  <100 ms %76 → %75 (değişmedi), 100–200 ms %58 → %55, ≥200 ms %31 → %27.
+- GAPS "perde hiç aktif değil" kaçanlar 4180 → 3134 (−%25) → GAPS perde ağırlığı işe yaradı.
+- GAPS kaçan oranı %32.8 → %28.3; hayalet %35.2 → %33.7. val_comp kaçan %20.0 → %18.1, hayalet %25.2 → %27.5.
+- Offset: GuitarSet'te kullanılıyor (0.5), GAPS'te seçilmedi — GAPS MIDI'si partisyon hizalı, nota
+  bitişleri sese tam oturmuyor (etiket sınırı). GAPS kare kaybı hâlâ notanın son %20'sinde (%51).
+
+Karar: **`tabcrnn_rep_off.pt` yeni taban** (hiçbir ölçüt düşmedi; GAPS ve tab F1'de en iyi değerler).
+Fingerstyle (GAPS) çıkış ölçütü sağlandı; val_comp ölçütü sağlanmadı (kullanıcı önceliği solo fingerstyle;
+akorlar kabul edilebilir). Açık kalan: <100 ms tekrarlar (%75 kaçıyor) — el yapımı özellikler (3c-0) ve
+tekrar ağırlığı çözmedi; aday nedenler GAPS etiket zamanlaması ve modelin zamansal kapasitesi.
+Katman 3.10'un kapanışı kullanıcı kararı.
+
 ## Katman 3.10 çıkış ölçütü ("ciddi iyileşme")
 `tabcrnn_onset_h` tabanına göre (aynı kalibrasyon ve ölçütle):
 - val_comp nota F1 ≥ +0.05 ve val_comp kare F1 ≥ +0.03
@@ -329,4 +537,11 @@ GS val 0.905/0.869, GS tab F1 0.748 (greedy) / 0.753 (Viterbi).
 - [x] Adım 2 — sonuçlar: tabcrnn_poly (val_comp +0.014/+0.017, GAPS kare +0.015); recall düzeldi, darboğaz precision
 - [x] GS solo tab F1 (tabcrnn_poly): 0.748 / 0.753 → yeni çalışma tabanı
 - [x] Adım 3a/3b — hayalet alt kırılımı + yeniden vuruş kuralı: kod + testler
-- [ ] Adım 3 — tam ölçüm (kullanıcı)
+- [x] Adım 3 revizyonu — enerji kanıtı ölçümü + çözümleme kuralları: kod + testler
+- [x] Adım 3 — tam ölçüm: GAPS nota 0.668 (+0.086), val_comp 0.773, GS val 0.915; kurallar kabul
+- [x] Adım 3 — GS tab F1 (eval_hmm, enerji kurallarıyla): 0.749 / 0.751 → kurallar varsayılan
+- [x] Adım 3c-1 — tekrar onset ağırlığı + GAPS perde ağırlığı: kod + testler
+- [x] Adım 3c-0 — giriş özelliği ölçümü: kısa pencere ayrımı artırmıyor → hop 256 / ek kanal yok
+- [x] Adım 3c — offset kafası: kod + testler + regresyon
+- [x] Adım 3c — tek birleşik eğitim + ölçüm: GAPS 0.689 / 0.675, tab F1 0.760 → `tabcrnn_rep_off.pt` yeni taban
+- [ ] Katman 3.10 kapanışı (kullanıcı kararı: val_comp ölçütü eksik)

@@ -229,7 +229,8 @@ def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
 
 def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
                         min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
-                        peak=False, reattack=0.0):
+                        peak=False, reattack=0.0, rise=None, rise_keep=0.0, rise_split=0.0,
+                        offset_mat=None, offset_threshold=0.0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -250,6 +251,15 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
       - reattack > 0 : aynı perde HÂLÂ ÇALARKEN gelen yeni onset, ancak tepe değeri
                        >= reattack ise yeni nota başlatır; değilse nota sürer
                        -> nota parçalanması (Adım 3a: akor hayaletlerinin ~%78'i).
+      - rise (T,P) dB: perde başına CQT enerji yükselişi (energy_rise). Gerçek bir yeniden
+        vuruş, önceki nota sönmeden de enerji sıçraması üretir; sahte bölünme üretmez.
+      - rise_keep  > 0 : aynı perde çalarken gelen onset, yükseliş >= rise_keep dB ise kabul
+                         (reattack ile birlikteyse ikisinden biri yeter).
+      - rise_split > 0 : süren notanın içinde onset eşiği AŞILMASA BİLE (onset >= eşik/2)
+                         yükseliş >= rise_split dB olan yerel tepe yeni nota başlatır
+                         -> önceki notaya gömülen hızlı tekrarlar (Adım 3 revizyonu).
+      - offset_mat (T,P) + offset_threshold > 0 (Adım 3c): nota, offset olasılığı eşiği aştığı
+                         karede biter (perde hâlâ aktif olsa bile) -> kuyruk/sonraki vuruş ayrımı.
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -257,10 +267,13 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
     on = onset_mat > onset_threshold
     T, P = active.shape
     starts = on & ~np.vstack([np.zeros((1, P), bool), on[:-1]])      # yükselen kenarlar
+    use_off = offset_mat is not None and offset_threshold > 0
     notes = []
     for p in range(P):
         st = list(np.nonzero(starts[:, p])[0])
-        if (peak or reattack > 0) and st:
+        use_rise = rise is not None and (rise_keep > 0 or rise_split > 0)
+        rmax = (lambda t: float(rise[max(0, t - 1):t + 3, p].max())) if use_rise else None
+        if (peak or reattack > 0 or (use_rise and rise_keep > 0)) and st:
             adj, pkv = [], {}
             for s_ in st:
                 e_ = s_
@@ -269,9 +282,12 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                 k_ = s_ + int(np.argmax(onset_mat[s_:e_, p])) if peak else s_
                 adj.append(k_); pkv[k_] = float(onset_mat[s_:e_, p].max())
             st = adj
-            if reattack > 0:                      # nota sürerken zayıf yeniden vuruşu yok say
+            keep_r = rise_keep if use_rise else 0.0
+            if reattack > 0 or keep_r > 0:        # nota sürerken zayıf yeniden vuruşu yok say
                 st = [s_ for i_, s_ in enumerate(st)
-                      if i_ == 0 or s_ == 0 or not cont[s_ - 1, p] or pkv[s_] >= reattack]
+                      if i_ == 0 or s_ == 0 or not cont[s_ - 1, p]
+                      or (reattack > 0 and pkv[s_] >= reattack)
+                      or (keep_r > 0 and rmax(s_) >= keep_r)]
         if refractory > 0 and len(st) > 1:
             kept = [st[0]]
             for s_ in st[1:]:
@@ -279,6 +295,17 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                     continue                      # önceki nota sürüyor: çift tetik
                 kept.append(s_)
             st = kept
+        if use_rise and rise_split > 0:           # gömülü hızlı tekrarları enerji kanıtıyla ayır
+            r = rise[:, p]
+            cand = np.nonzero((r >= rise_split) & cont[:, p]
+                              & np.concatenate([[False], cont[:-1, p]])
+                              & (onset_mat[:, p] >= onset_threshold * 0.5)
+                              & (r >= np.concatenate([[0], r[:-1]]))
+                              & (r >= np.concatenate([r[1:], [0]])))[0]
+            have = np.array(st, int)
+            extra = [int(t) for t in cand if not len(have) or np.abs(have - t).min() > 3]
+            if extra:
+                st = sorted(st + extra)
         covered = np.zeros(T, bool) if fallback > 0 else None
         for k, s0 in enumerate(st):
             nxt = st[k + 1] if k + 1 < len(st) else T
@@ -290,6 +317,8 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
             b = a
             while b < nxt and cont[b, p]:
                 b += 1
+                if use_off and b - s0 >= min_frames and offset_mat[b - 1, p] >= offset_threshold:
+                    break                         # offset kafası: nota bu karede bitiyor
             if b - s0 >= min_frames:
                 notes.append((int(s0), int(b), pitch_lo + p))
                 if covered is not None:
@@ -309,8 +338,30 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
     return notes
 
 
+def energy_rise(cqt_db, instrument: Instrument = STANDARD_6, k: int = 3,
+                harmonics=(0, 24, 38), bins_per_semitone: int = 2, fmin_midi: int = 24):
+    """
+    Katman 3.10 Adım 3 revizyonu — CQT (T, n_bins, dB) -> (T, P) perde başına enerji yükselişi (dB).
+    E_p(t) = perdenin temel + 2. + 3. harmonik binlerindeki (±1 bin) en yüksek enerjinin ortalaması;
+    rise(t) = E_p(t) - min(E_p(t-k .. t-1)), negatifler 0. Model değil, doğrudan sesin kanıtı.
+    """
+    c = np.asarray(cqt_db, dtype=np.float32)
+    T, F = c.shape
+    lo, hi = instrument.pitch_range()
+    E = np.zeros((T, hi - lo + 1), np.float32)
+    for i, p in enumerate(range(lo, hi + 1)):
+        b = bins_per_semitone * (p - fmin_midi)
+        vals = [c[:, max(0, b + h - 1):min(F, b + h + 2)].max(1) for h in harmonics if b + h < F]
+        E[:, i] = np.mean(vals, axis=0)
+    prev = np.full_like(E, np.inf)
+    for j in range(1, k + 1):
+        sh = np.full_like(E, np.inf); sh[j:] = E[:-j]
+        prev = np.minimum(prev, sh)
+    return np.maximum(E - np.where(np.isinf(prev), E, prev), 0.0)
+
+
 def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
-            instrument: Instrument = STANDARD_6, min_frames: int = 2, **dec):
+            instrument: Instrument = STANDARD_6, min_frames: int = 2, rise=None, offsets=None, **dec):
     """
     Tek giriş noktası: model çıktısı -> [(start, end, pitch)].
     onsets None ise eski kare-eşik segmentasyonu (Katman 3.6), değilse onset tabanlı (3.9).
@@ -320,4 +371,9 @@ def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
     if onsets is None or onset_threshold is None:
         return segment_notes(pm, lo, threshold, min_frames=min_frames)
     om = pitch_onset_matrix(probs, onsets, instrument)
-    return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames, **dec)
+    if offsets is not None and dec.get("offset_threshold", 0) > 0:     # Adım 3c: offset kafası
+        dec = dict(dec, offset_mat=pitch_onset_matrix(probs, offsets, instrument))
+    else:
+        dec = {k: v for k, v in dec.items() if k != "offset_threshold"}
+    return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames,
+                               rise=rise, **dec)

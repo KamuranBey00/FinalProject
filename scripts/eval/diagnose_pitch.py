@@ -23,6 +23,11 @@ D) (Katman 3.10 Adım 3a) HAYALET ALT KIRILIMI — çözümleme kuralı seçmek 
    sonra uzama | farklı perde; hangi kural üretti (onset / yedek); onset tepe değeri;
    "yeniden vuruş" (aynı perdede önceki tahmin yeni bitmişken başlayan nota) için
    onset eşiği tablosu: eşik x -> kaç hayalet / kaç doğru nota elenir.
+E) (Adım 3 revizyonu) HIZLI AYNI PERDE TEKRARLARI ve ENERJİ KANITI:
+   tekrarların vuruş aralığına (IOI) göre kaçma oranı; kaçanların kaçı önceki notaya
+   gömülmüş; CQT enerji yükselişi eşiği x için: gömülü tekrarların yakalanma oranı,
+   süren (gerçek tekrarsız) notalarda yanlış alarm oranı, ses kesilmeden gelen yeniden
+   vuruşlarda hayalet / doğru notaların elenme oranı.
 
 Çalıştırma:
     python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_onset_h.pt --splits val_comp gaps_val
@@ -71,12 +76,18 @@ def analyse(data, thr, ot, dec=None):
     gsub = Counter(); gsrc = Counter(); frag_gap = []; late_off = []
     peak_ok, peak_gh = [], []                    # onset tepe değeri: eşleşen / hayalet
     re_ok, re_gh = [], []                        # yalnız "yeniden vuruş" notaları
+    rep_tot = Counter(); rep_miss = Counter(); rep_buried = 0; rep_n = 0
+    rise_buried, rise_sustain, rise_re_ok, rise_re_gh = [], [], [], []
 
-    for probs, ons, frame, onset in data:
+    for probs, ons, frame, onset, *rest in data:
+        rise = rest[0] if rest else None
+        offs = rest[1] if len(rest) > 1 and rest[1] is not None else None
         pm, _ = pitch_matrix(probs, INSTR)
         n = min(len(pm), len(frame))
         pm, fr, on = pm[:n], frame[:n] > 0, onset[:n] > 0
-        est = segment(probs[:n], None if ons is None else ons[:n], thr, ot, INSTR, **(dec or {}))
+        est = segment(probs[:n], None if ons is None else ons[:n], thr, ot, INSTR,
+                      rise=None if rise is None else rise[:n], offsets=None if offs is None else offs[:n],
+                      **(dec or {}))
         ref = roll_to_notes(fr, on, lo)
         n_ref += len(ref); n_est += len(est)
         ri, rp = to_mir(ref); ei, ep = to_mir(est)
@@ -126,6 +137,8 @@ def analyse(data, thr, ot, dec=None):
         no_fb = None
         if dec and dec.get("fallback", 0) and ot is not None:
             no_fb = {(e[0], e[2]) for e in segment(probs[:n], ons[:n], thr, ot, INSTR,
+                                                    rise=None if rise is None else rise[:n],
+                                                    offsets=None if offs is None else offs[:n],
                                                     **dict(dec, fallback=0))}
         last_end = {}
         for j, (a, b, p) in enumerate(est):
@@ -153,6 +166,40 @@ def analyse(data, thr, ot, dec=None):
                 gsub["nota bittikten sonra (uzama/yeniden tetik)"] += 1
             else:
                 gsub["farkli perde / sessizlik"] += 1
+
+        # ---- E) hızlı aynı perde tekrarları + enerji kanıtı
+        if rise is not None:
+            rz = rise[:n]
+            rmax = lambda t, q: float(rz[max(0, t - 1):min(n, t + 3), q - lo].max())
+            by_p = {}
+            for i, (a, b, p) in enumerate(ref):
+                by_p.setdefault(p, []).append((a, b, i))
+            onsets_p = {q: np.array([x[0] for x in v]) for q, v in by_p.items()}
+            for q, v in by_p.items():
+                v.sort()
+                for (a1, b1, i1), (a2, b2, i2) in zip(v, v[1:]):
+                    if a2 - b1 > 3:
+                        continue
+                    ioi = (a2 - a1) / 43.07 * 1000
+                    key = "<100 ms" if ioi < 100 else ("100-200 ms" if ioi < 200 else ">=200 ms")
+                    rep_tot[key] += 1; rep_n += 1
+                    if i2 not in m_ref:
+                        rep_miss[key] += 1
+                        if any(e[2] == q and e[0] < a2 - 2 and e[1] > a2 + 1 for e in est):
+                            rep_buried += 1
+                            rise_buried.append(rmax(a2, q))
+            for j, (a, b, p) in enumerate(est):
+                if j not in m_est or b - a < 8:
+                    continue                         # süren doğru notalar: iç karelerde yanlış alarm
+                ro = onsets_p.get(p, np.array([]))
+                inner = [t for t in range(a + 4, b - 1) if not len(ro) or np.abs(ro - t).min() > 3]
+                if inner:
+                    rise_sustain.append(float(rz[inner, p - lo].max()))
+            ends = {}
+            for j, (a, b, p) in enumerate(est):
+                if p in ends and 0 <= a - ends[p] <= 0:   # önceki tahmin tam burada bitti: ses kesilmeden
+                    (rise_re_ok if j in m_est else rise_re_gh).append(rmax(a, p))
+                ends[p] = b
 
         # ---- B) hayalet notalar
         for j, (a, b, p) in enumerate(est):
@@ -182,7 +229,10 @@ def analyse(data, thr, ot, dec=None):
                 n_ref=n_ref, n_est=n_est, pos_miss=pos_miss, pos_tot=pos_tot, cover=cover,
                 gsub=gsub, gsrc=gsrc, frag_gap=frag_gap, late_off=late_off,
                 peak_ok=np.array(peak_ok), peak_gh=np.array(peak_gh),
-                re_ok=np.array(re_ok), re_gh=np.array(re_gh))
+                re_ok=np.array(re_ok), re_gh=np.array(re_gh),
+                rep_tot=rep_tot, rep_miss=rep_miss, rep_buried=rep_buried, rep_n=rep_n,
+                rise_buried=np.array(rise_buried), rise_sustain=np.array(rise_sustain),
+                rise_re_ok=np.array(rise_re_ok), rise_re_gh=np.array(rise_re_gh))
 
 
 def report(r):
@@ -236,6 +286,27 @@ def report(r):
             print(f"    tepe esigi ({name}, n={len(ok)}+{len(gh)}): {row}")
 
 
+def report_repeats(r):
+    if not r["rep_n"]:
+        return
+    nm = sum(r["rep_miss"].values())
+    print()
+    print("  E) Hizli ayni perde tekrarlari (onceki nota bittikten <=3 kare sonra):")
+    print(f"    tekrar {r['rep_n']} | kacan {nm} ({pct(nm, r['rep_n'])}) | "
+          f"kacanlardan onceki tahmin notasina GOMULU: {r['rep_buried']} ({pct(r['rep_buried'], nm)})")
+    print("    kacma orani: " + "   ".join(f"{k}: {pct(r['rep_miss'][k], r['rep_tot'][k])} (n={r['rep_tot'][k]})"
+                                       for k in ("<100 ms", "100-200 ms", ">=200 ms") if r["rep_tot"][k]))
+    rb, rs, ro, rg = r["rise_buried"], r["rise_sustain"], r["rise_re_ok"], r["rise_re_gh"]
+    med = lambda x: f"{np.median(x):.1f}" if len(x) else "-"
+    print(f"    enerji yukselisi medyan (dB): gomulu gercek tekrar {med(rb)} | suren notada (tekrarsiz) {med(rs)} | "
+          f"ses kesilmeden yeniden vurus: dogru {med(ro)} / hayalet {med(rg)}")
+    print("    esik x (dB) ->  gomulu tekrar yakalanir | suren notada yanlis alarm | yeniden vurusta: hayalet elenir / dogru elenir")
+    for x in (2, 4, 6, 8, 10):
+        f = lambda a, c: f"{100 * np.mean(c(a)):4.0f}%" if len(a) else "   -"
+        print(f"    {x:>4}             {f(rb, lambda a: a >= x)}              {f(rs, lambda a: a >= x)}"
+              f"                     {f(rg, lambda a: a < x)} / {f(ro, lambda a: a < x)}")
+
+
 def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note"):
     device = get_device()
     model, ck, kind = load_model("crnn", device, ckpt)
@@ -253,7 +324,9 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note"):
         print(f"\n{'=' * 78}\n{split}  ({len(data)} kayit) | esikler '{sel}' uzerinde: perde {thr}, "
               f"cozumleme {'kare-esik' if ot is None else f'onset@{ot}'}"
               + (f" {dec}" if ot is not None else "") + f"\n{'=' * 78}")
-        report(analyse(data, thr, ot, dec))
+        res = analyse(data, thr, ot, dec)
+        report(res)
+        report_repeats(res)
 
 
 if __name__ == "__main__":

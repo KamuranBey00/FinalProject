@@ -142,9 +142,14 @@ class TabCRNNOnset(TabCRNN):
     forward() yalnızca tab logit'i döndürür -> tüm eski değerlendirme kodu çalışır.
     """
     def __init__(self, num_strings=6, n_classes=26, n_bins=192, lstm_hidden=128, lstm_layers=2,
-                 harmonics=None):
+                 harmonics=None, offset=False):
         super().__init__(num_strings, n_classes, n_bins, lstm_hidden, lstm_layers, harmonics)
         self.onset_head = nn.Linear(lstm_hidden * 2, num_strings)
+        # Katman 3.10 Adım 3c: OFFSET kafası ("bu karede bu teldeki nota bitiyor"); offset=False
+        # iken modül yok -> eski checkpoint'ler birebir yüklenir.
+        self.offset_head = nn.Linear(lstm_hidden * 2, num_strings) if offset else None
+        if offset:
+            nn.init.constant_(self.offset_head.bias, -2.94)
         # Seyrek hedef (karelerin ~%5'i onset): bias'ı bu önsel orana göre başlat
         # (logit(0.05) ≈ -2.94). Sıfır bias ile kafa her yerde ~0.5 tahminle başlıyor
         # ve tek başına bu önseli öğrenmek epoch'lar sürüyordu (duman testi).
@@ -156,11 +161,19 @@ class TabCRNNOnset(TabCRNN):
         tab = self.head(z).view(B, L, self.num_strings, self.n_classes)
         return tab, self.onset_head(z)           # (B,L,S,C), (B,L,S)
 
+    def forward_all(self, x):
+        """-> tab (B,L,S,C), onset logit (B,L,S), offset logit (B,L,S) | None"""
+        z = self.encode(x)
+        B, L, _ = z.shape
+        tab = self.head(z).view(B, L, self.num_strings, self.n_classes)
+        off = self.offset_head(z) if self.offset_head is not None else None
+        return tab, self.onset_head(z), off
+
 
 def warm_start_state(state, model):
     """
     Eski bir checkpoint'in ağırlıklarını (yeni) modele taşır, YAPILANLARI KORUYARAK:
-      - onset_head yoksa: modelin kendi (önsel bias'lı) başlangıcı kalır
+      - onset_head / offset_head yoksa: modelin kendi (önsel bias'lı) başlangıcı kalır
       - giriş 1 kanal -> H harmonik kanal: h=1 kanalına eski ağırlık, diğerleri 0
         -> yeni model başlangıçta eski modelle BİREBİR aynı çıktıyı verir;
            eğitim harmonik kanalları kullanmayı öğrenir.

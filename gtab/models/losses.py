@@ -58,3 +58,40 @@ def tab_pitch_target(y, idx):
     """
     hit = (y.unsqueeze(-1) == idx.view(1, 1, *idx.shape)) & (idx >= 0).view(1, 1, *idx.shape)
     return hit.any(2).float()
+
+
+def _rising(on):
+    """(B,L,K) onset hedefi (keskin ya da genişletilmiş) -> onset'in İLK karesi (bool)."""
+    hard = on >= 0.999
+    prev = torch.zeros_like(hard); prev[:, 1:] = hard[:, :-1]
+    return hard & ~prev
+
+
+def _offset_from(cur_on, same_next, onset, soft):
+    """Ortak: nota bu karede biter = aktif & (sonraki kare aynı nota değil ya da yeni onset)."""
+    nxt_on = torch.zeros_like(cur_on); nxt_on[:, :-1] = _rising(onset)[:, 1:]
+    end = cur_on & (~same_next | nxt_on)
+    tgt = end.float()
+    if soft is not None:                       # onset ile simetrik: bitişten önceki kare 'soft'
+        prv = torch.zeros_like(tgt); prv[:, :-1] = tgt[:, 1:] * float(soft)
+        tgt = torch.maximum(tgt, prv * cur_on.float())
+    mask = torch.ones(tgt.shape[:2], device=tgt.device)
+    mask[:, -1] = 0                            # chunk'ın son karesi: devamı bilinmiyor
+    return tgt, mask
+
+
+def string_offset_target(y, onset, soft=None):
+    """
+    Katman 3.10 Adım 3c — tab etiketi (B,L,S) + tel onset hedefi (B,L,S) -> (B,L,S) OFFSET hedefi
+    (notanın son karesi = 1) ve (B,L) kare maskesi.
+    """
+    cur = y > 0
+    same = torch.zeros_like(cur); same[:, :-1] = y[:, 1:] == y[:, :-1]
+    return _offset_from(cur, same, onset, soft)
+
+
+def pitch_offset_target(frame, onset, soft=None):
+    """Katman 3.10 Adım 3c — perde roll'u (B,L,P) + onset hedefi -> (B,L,P) offset hedefi, (B,L) maske."""
+    cur = frame > 0.5
+    same = torch.zeros_like(cur); same[:, :-1] = cur[:, 1:]
+    return _offset_from(cur, same, onset, soft)
