@@ -65,12 +65,12 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
     2a: @100ms farkı küçük (+0.006…+0.022) → hata küçük kayma değil, muhtemelen nota parçalanması;
     GAPS `.match` kalite ölçüsü olarak güvenilmez, etiket gürültüsü kanıtı yok.
     Çıkış ölçütü sağlanmadı; katman sürüyor.
-  - **Bekleyen (kullanıcı çalıştıracak):** GS solo tab F1 →
-    `python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --off-ratio 1.0 --refractory 6 --fallback 10 --peak`
-    ≥ 0.733 ise tabcrnn_poly yeni çalışma tabanı.
-  - **Sıradaki: Adım 3 (README11)** — hayalet/precision: 3a diagnose_pitch'e hayalet alt kırılımı
-    (fragman / geç-erken başlangıç / hangi kural / onset tepe değeri), 3b eğitimsiz fragman birleştirme
-    ve yeniden vuruş eşiği, 3c gerekirse eğitim (onset pos_weight 3→1, offset kafası, sert negatif).
+  - GS solo tab F1 (tabcrnn_poly): greedy 0.748, Viterbi 0.753 → **tabcrnn_poly.pt yeni çalışma tabanı**.
+  - **Adım 3 kodlandı, kullanıcının tam ölçümü bekleniyor** (komutlar README11): 3a diagnose_pitch
+    bölüm D (hayalet alt kırılımı) — duman testinde akor hayaletlerinin %78'i fragman (nota sürerken
+    zayıf onset notayı bölüyor, boşluk 0 kare); 3b `reattack` kuralı (nota sürerken yeni onset ancak
+    tepe ≥ eşik ise yeni nota), kalibrasyonda {0.3…0.7} aranır; eval_hmm `--reattack`.
+    Sonraki aday (gerekirse): onset pos_weight 3→1, offset kafası.
 - Tel tarafı (gerekirse): A teli 0.66; adaylar 36 bin/oktav önbellek, hex öğretmen
   damıtması, SynthTab naylon + GAPS partisyon TAB etiketleri (`.match`).
 - **Denenmiş, işe yaramayan (tekrarlama):** el yapımı Viterbi hareket maliyeti;

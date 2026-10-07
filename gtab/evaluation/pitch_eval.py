@@ -143,6 +143,8 @@ DEC_GRID = [dict(off_ratio=o, refractory=r, fallback=f)
             for o in (1.0, 0.7, 0.5) for r in (0, 3, 6) for f in (0, 10)]
 NO_DEC = dict(off_ratio=1.0, refractory=0, fallback=0)          # = Katman 3.9 davranışı
 # Adım 2: kurallar seçildikten sonra "onset tepe noktasından başlat" ayrıca denenir
+# Adım 3b: ardından "nota sürerken yeniden vuruş" için onset tepe eşiği
+REATTACK_GRID = (0.3, 0.4, 0.5, 0.6, 0.7)
 
 
 def score(r, criterion="note"):
@@ -162,7 +164,7 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note"):
     -> (doğrulama skoru, perde eşiği, onset eşiği | None, dec sözlüğü)
     """
     best = (-1, None, None, dict(NO_DEC))
-    best_on = None                                 # en iyi onset seçeneği (2. aşama için)
+    best_on = None                                 # en iyi onset seçeneği (sonraki aşamalar için)
     for ot in on_grid:
         sel = evaluate_split(data, onset_thr=ot)
         t = max(sel, key=lambda t: score(sel[t], criterion))
@@ -172,16 +174,28 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note"):
         if ot is not None and (best_on is None or cand[0] > best_on[0]):
             best_on = cand
     if dec_grid and best_on is not None:
+        # 2. aşama: onset adayı kendi içinde iyileştirilir (kare-eşik kazanmış olsa bile),
+        # sonunda kare-eşik ile karşılaştırılır.
         _, thr, ot, _ = best_on
         near = sorted({round(min(0.9, max(0.3, thr + d)), 1) for d in (-0.1, 0.0, 0.1)})
         for dec in dec_grid:
             sel = evaluate_split(data, thresholds=near, onset_thr=ot, dec=dec)
             t = max(sel, key=lambda t: score(sel[t], criterion))
-            if score(sel[t], criterion) > best[0]:
-                best = (score(sel[t], criterion), t, ot, dict(dec))
-        if best[2] is not None:                    # tepe noktasından başlatma (Adım 2)
-            dec = dict(best[3], peak=True)
-            sel = evaluate_split(data, thresholds=[best[1]], onset_thr=best[2], dec=dec)
-            if score(sel[best[1]], criterion) > best[0]:
-                best = (score(sel[best[1]], criterion), best[1], best[2], dec)
+            if score(sel[t], criterion) > best_on[0]:
+                best_on = (score(sel[t], criterion), t, ot, dict(dec))
+        # tepe noktasından başlatma (Adım 2)
+        f0, t0, o0, d0 = best_on
+        dec = dict(d0, peak=True)
+        sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
+        if score(sel[t0], criterion) > f0:
+            best_on = (score(sel[t0], criterion), t0, o0, dec)
+        # yeniden vuruş eşiği (Adım 3b)
+        f0, t0, o0, d0 = best_on
+        for ra in REATTACK_GRID:
+            dec = dict(d0, reattack=ra)
+            sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
+            if score(sel[t0], criterion) > best_on[0]:
+                best_on = (score(sel[t0], criterion), t0, o0, dec)
+        if best_on[0] > best[0]:
+            best = best_on
     return best

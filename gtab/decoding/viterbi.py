@@ -229,7 +229,7 @@ def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
 
 def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
                         min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
-                        peak=False):
+                        peak=False, reattack=0.0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -247,6 +247,9 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                        notanın tamamen düşmesi.
       - peak=True    : nota, onset eşiği üstündeki koşunun TEPE karesinden başlar
                        (yükselen kenardan değil) -> başlangıç zamanlaması (Adım 2).
+      - reattack > 0 : aynı perde HÂLÂ ÇALARKEN gelen yeni onset, ancak tepe değeri
+                       >= reattack ise yeni nota başlatır; değilse nota sürer
+                       -> nota parçalanması (Adım 3a: akor hayaletlerinin ~%78'i).
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -257,14 +260,18 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
     notes = []
     for p in range(P):
         st = list(np.nonzero(starts[:, p])[0])
-        if peak and st:
-            adj = []
+        if (peak or reattack > 0) and st:
+            adj, pkv = [], {}
             for s_ in st:
                 e_ = s_
                 while e_ < T and on[e_, p]:
                     e_ += 1
-                adj.append(s_ + int(np.argmax(onset_mat[s_:e_, p])))
+                k_ = s_ + int(np.argmax(onset_mat[s_:e_, p])) if peak else s_
+                adj.append(k_); pkv[k_] = float(onset_mat[s_:e_, p].max())
             st = adj
+            if reattack > 0:                      # nota sürerken zayıf yeniden vuruşu yok say
+                st = [s_ for i_, s_ in enumerate(st)
+                      if i_ == 0 or s_ == 0 or not cont[s_ - 1, p] or pkv[s_] >= reattack]
         if refractory > 0 and len(st) > 1:
             kept = [st[0]]
             for s_ in st[1:]:

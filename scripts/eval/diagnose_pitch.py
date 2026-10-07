@@ -17,6 +17,12 @@ B) HAYALET NOTALAR (eşleşmeyen tahminler) — gerçek notalarla ilişkisi?
    sessizlikte | diğer   + süre dağılımı
 C) KARE KAYBI notanın neresinde? baş / orta / son (sönümleme) + eşleşen notaların
    kapsama oranı (nota erken mi bitiyor?)
+D) (Katman 3.10 Adım 3a) HAYALET ALT KIRILIMI — çözümleme kuralı seçmek için:
+   fragman (aynı perdede ZATEN BULUNMUŞ gerçek notanın içinde ikinci parça) |
+   kayık başlangıç (gerçek nota var ama bulunamamış, başlangıç >50 ms kayık) | nota bitti
+   sonra uzama | farklı perde; hangi kural üretti (onset / yedek); onset tepe değeri;
+   "yeniden vuruş" (aynı perdede önceki tahmin yeni bitmişken başlayan nota) için
+   onset eşiği tablosu: eşik x -> kaç hayalet / kaç doğru nota elenir.
 
 Çalıştırma:
     python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_onset_h.pt --splits val_comp gaps_val
@@ -29,7 +35,7 @@ import mir_eval
 import numpy as np
 
 from gtab.core.instrument import STANDARD_6
-from gtab.decoding.viterbi import pitch_matrix, segment
+from gtab.decoding.viterbi import pitch_matrix, pitch_onset_matrix, segment
 from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, load_split, roll_to_notes,
                                         selection_split, to_mir)
 from gtab.models.inference import load_model
@@ -62,6 +68,9 @@ def analyse(data, thr, ot, dec=None):
     tot_by = {k: Counter() for k in ("sure", "register", "polifoni", "tekrar")}
     ghost = Counter(); ghost_dur = Counter(); n_ref = n_est = 0
     pos_miss = Counter(); pos_tot = Counter(); cover = []
+    gsub = Counter(); gsrc = Counter(); frag_gap = []; late_off = []
+    peak_ok, peak_gh = [], []                    # onset tepe değeri: eşleşen / hayalet
+    re_ok, re_gh = [], []                        # yalnız "yeniden vuruş" notaları
 
     for probs, ons, frame, onset in data:
         pm, _ = pitch_matrix(probs, INSTR)
@@ -112,6 +121,39 @@ def analyse(data, thr, ot, dec=None):
             for k, v in keys.items():
                 miss_by[k][v] += 1
 
+        # ---- D) hayalet alt kırılımı + onset tepe değerleri
+        om = pitch_onset_matrix(probs[:n], ons[:n], INSTR) if ons is not None else None
+        no_fb = None
+        if dec and dec.get("fallback", 0) and ot is not None:
+            no_fb = {(e[0], e[2]) for e in segment(probs[:n], ons[:n], thr, ot, INSTR,
+                                                    **dict(dec, fallback=0))}
+        last_end = {}
+        for j, (a, b, p) in enumerate(est):
+            pk = float(om[a:min(n, a + 3), p - lo].max()) if om is not None and a < n else np.nan
+            reat = p in last_end and a - last_end[p] <= 3          # önceki aynı perde tahmin yeni bitti
+            last_end[p] = max(last_end.get(p, -99), b)
+            (peak_ok if j in m_est else peak_gh).append(pk)
+            if reat:
+                (re_ok if j in m_est else re_gh).append(pk)
+            if j in m_est:
+                continue
+            if no_fb is not None:
+                gsrc["yedek kural (onset'siz)" if (a, p) not in no_fb else "onset ile baslatilmis"] += 1
+            inside = [i for i, (ra, rb, rp_) in enumerate(ref) if rp_ == p and ra <= a < rb]
+            before = [i for i, (ra, rb, rp_) in enumerate(ref) if rp_ == p and rb <= a <= rb + 3]
+            if inside and any(i in m_ref for i in inside):
+                gsub["fragman (gercek nota zaten bulunmus)"] += 1
+                prev = [e for e in est if e[2] == p and e[1] <= a + 1 and e[0] < a]
+                if prev:
+                    frag_gap.append(a - max(e[1] for e in prev))
+            elif inside:
+                gsub["kayik baslangic (gercek nota bulunamamis)"] += 1
+                late_off.append(1000.0 * (a - ref[inside[0]][0]) / 43.07)
+            elif before:
+                gsub["nota bittikten sonra (uzama/yeniden tetik)"] += 1
+            else:
+                gsub["farkli perde / sessizlik"] += 1
+
         # ---- B) hayalet notalar
         for j, (a, b, p) in enumerate(est):
             if j in m_est:
@@ -137,7 +179,10 @@ def analyse(data, thr, ot, dec=None):
                 cover.append(seg.mean())
 
     return dict(miss=miss, miss_by=miss_by, tot_by=tot_by, ghost=ghost, ghost_dur=ghost_dur,
-                n_ref=n_ref, n_est=n_est, pos_miss=pos_miss, pos_tot=pos_tot, cover=cover)
+                n_ref=n_ref, n_est=n_est, pos_miss=pos_miss, pos_tot=pos_tot, cover=cover,
+                gsub=gsub, gsrc=gsrc, frag_gap=frag_gap, late_off=late_off,
+                peak_ok=np.array(peak_ok), peak_gh=np.array(peak_gh),
+                re_ok=np.array(re_ok), re_gh=np.array(re_gh))
 
 
 def report(r):
@@ -163,6 +208,32 @@ def report(r):
         c = np.array(r["cover"])
         print(f"    eslesen notalarin kare kapsamasi: medyan {np.median(c):.2f} | "
               f"%{100 * np.mean(c < 0.7):.0f}'i notanin %70'inden azini kapsiyor (erken bitis)")
+
+    ng = sum(r["gsub"].values())
+    print()
+    print("  D) Hayalet alt kirilimi (Adim 3a):")
+    for k, v in r["gsub"].most_common():
+        print(f"    {k:<48}{pct(v, ng)}  (n={v})")
+    if r["gsrc"]:
+        print("    kaynak: " + "   ".join(f"{k}: {pct(v, ng)}" for k, v in r["gsrc"].most_common()))
+    if r["frag_gap"]:
+        g = np.array(r["frag_gap"])
+        print(f"    fragmanlarda onceki parcayla bosluk (kare): medyan {np.median(g):.0f} | "
+              f"<=2: %{100 * np.mean(g <= 2):.0f} | <=5: %{100 * np.mean(g <= 5):.0f}")
+    if r["late_off"]:
+        o = np.array(r["late_off"])
+        print(f"    kayik baslangiclarda gecikme (ms): medyan {np.median(o):.0f} | "
+              f">100 ms: %{100 * np.mean(o > 100):.0f}")
+    po, pg = r["peak_ok"], r["peak_gh"]
+    if len(po) and not np.isnan(po).all():
+        print(f"    onset tepe degeri: dogru notalar medyan {np.nanmedian(po):.2f} | "
+              f"hayaletler medyan {np.nanmedian(pg):.2f}")
+        for name, ok, gh in (("tum notalar", po, pg), ("yeniden vurus", r["re_ok"], r["re_gh"])):
+            if not len(gh):
+                continue
+            row = "   ".join(f">={x}: hayalet -%{100 * np.mean(gh < x):.0f} / dogru -%{100 * np.mean(ok < x):.0f}"
+                             for x in (0.3, 0.5, 0.7, 0.9))
+            print(f"    tepe esigi ({name}, n={len(ok)}+{len(gh)}): {row}")
 
 
 def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note"):

@@ -277,6 +277,44 @@ yalnızca onset'siz bölgelerde uzun aktivasyonla sınırlanması. Hepsi doğrul
 "offset" modülü (nota sonu kafası) ile parçalanmanın modellenmesi, GAPS harmonik/oktav
 hayaletleri için sert negatif ağırlık.
 
+### Adım 2 kararı (7 Ekim 2026)
+GS solo tab F1 (`tabcrnn_poly`, onset@0.2, refrakter 6, yedek 10, tepe): greedy **0.748**,
+öğrenilen Viterbi (w_tr 0.25) **0.753** (taban 0.743); oracle tel doğruluğu 0.850 → 0.854.
+→ **`tabcrnn_poly.pt` yeni çalışma tabanı.** Projenin en yüksek tab F1'i.
+
+## Adım 3 — hayaletler (uygulandı: 3a ölçüm + 3b kural; tam ölçüm bekleniyor)
+### 3a. Hayalet alt kırılımı (`diagnose_pitch`, yeni bölüm D)
+Duman testi (val_comp, 3 kayıt, tabcrnn_poly — kesin değil ama çok net):
+- Hayaletlerin **%78'i fragman**: aynı perdede zaten bulunmuş gerçek notanın içinde ikinci parça;
+  önceki parçayla boşluk **0 kare** (%98'i ≤2) → nota sürerken gelen zayıf bir onset notayı ikiye bölüyor.
+  Refrakter pencere (ilk 6 kare) bunları yakalamıyor.
+- %97'si onset ile başlatılmış (yedek kural kaynaklı değil).
+- "Kayık başlangıç" hayaletlerinde gecikme medyan 209 ms (hepsi >100 ms) → 100 ms testinin
+  neden az kazandırdığını açıklıyor.
+- Onset tepe değeri: doğru notalar medyan 0.60, hayaletler 0.41. Yeniden vuruşlarda eşik 0.3
+  hayaletlerin %32'sini, doğru tekrarların %6'sını eler.
+
+### 3b. Kural: yeniden vuruş eşiği (`segment_notes_onset(reattack=...)`)
+Aynı perde hâlâ çalarken gelen yeni onset, ancak onset tepe değeri ≥ `reattack` ise yeni nota
+başlatır; değilse nota sürer. Varsayılan 0 = kapalı (eski davranış birebir, test edildi).
+Kalibrasyon: refrakter/histerezis/yedek → tepe → `reattack ∈ {0.3 … 0.7}`, hepsi doğrulamada.
+Düzeltme: birinci aşamada kare-eşik kazandığında tepe/yeniden vuruş hiç denenmiyordu; artık onset
+adayı tüm aşamalarda ayrıca iyileştirilip sonunda kare-eşikle karşılaştırılıyor.
+Duman testi (3 kayıt): val'de onset@0.2 + tepe + yeniden vuruş 0.3 seçildi; val_comp nota F1
+(aynı 3 kayıtta) 0.698 → 0.793. Kesin değil.
+
+### Çalıştırma
+```bash
+# 3a — tam hayalet analizi (doğrulama setleri)
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_poly.pt --splits val_comp gaps_val --criterion mix
+# 3b — yeniden vuruş kuralıyla test setleri
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_poly.pt --splits gaps_test val val_comp --criterion mix
+# GS solo tab F1 ([val] secim satırındaki değerlerle)
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --off-ratio <..> --refractory <..> --fallback <..> [--peak] --reattack <..>
+```
+Karşılaştırma tabanı (tabcrnn_poly, Adım 2 kuralları): GAPS 0.582/0.656, val_comp 0.744/0.817,
+GS val 0.905/0.869, GS tab F1 0.748 (greedy) / 0.753 (Viterbi).
+
 ## Katman 3.10 çıkış ölçütü ("ciddi iyileşme")
 `tabcrnn_onset_h` tabanına göre (aynı kalibrasyon ve ölçütle):
 - val_comp nota F1 ≥ +0.05 ve val_comp kare F1 ≥ +0.03
@@ -289,5 +327,6 @@ hayaletleri için sert negatif ağırlık.
 - [x] Adım 1 kararı: kurallar + mix varsayılan (GS tab F1 0.743)
 - [x] Adım 2 — kontroller + ince ayar seçenekleri: kod + testler
 - [x] Adım 2 — sonuçlar: tabcrnn_poly (val_comp +0.014/+0.017, GAPS kare +0.015); recall düzeldi, darboğaz precision
-- [ ] GS solo tab F1 (tabcrnn_poly) ölçümü
-- [ ] Adım 3 — hayalet (precision) analizi ve çözümü
+- [x] GS solo tab F1 (tabcrnn_poly): 0.748 / 0.753 → yeni çalışma tabanı
+- [x] Adım 3a/3b — hayalet alt kırılımı + yeniden vuruş kuralı: kod + testler
+- [ ] Adım 3 — tam ölçüm (kullanıcı)

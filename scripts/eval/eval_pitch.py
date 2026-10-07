@@ -57,7 +57,7 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
             print(f"  [{sp}] secim: perde esigi={t}, cozumleme="
                   f"{'kare-esik' if o is None else f'onset@{o}'}"
                   + (f", histerezis={dec['off_ratio']}, refrakter={dec['refractory']}, yedek={dec['fallback']}"
-                     f", tepe={dec.get('peak', False)}"
+                     f", tepe={dec.get('peak', False)}, yeniden_vurus={dec.get('reattack', 0.0)}"
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
         return cal[sp]
 
