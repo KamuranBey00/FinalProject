@@ -68,7 +68,8 @@ def tab_class_to_fret(c: int):
     return None if c == 0 else c - 1
 
 
-def string_onsets(tab, onset_roll=None, instrument: Instrument = STANDARD_6, dilate: int = 2):
+def string_onsets(tab, onset_roll=None, instrument: Instrument = STANDARD_6, dilate: int = 2,
+                  soft=None):
     """
     Katman 3.9 / Adım 1 — (T, S) tab etiketi -> (T, S) tel başına ONSET hedefi (0/1).
     Bir telde yeni nota başlar:
@@ -76,6 +77,9 @@ def string_onsets(tab, onset_roll=None, instrument: Instrument = STANDARD_6, dil
       (2) perde onset roll'u (önbellekteki 'onset', (T, P)) o telin o anki perdesinde
           işaretliyse -> AYNI perdenin art arda yeniden çalınması da yakalanır.
     dilate: işareti sonraki karelere de yayar (etiket yuvarlama kaymasına tolerans).
+    soft (Katman 3.10 Adım 2): verilirse dilate yok sayılır; hedef KESKİN olur:
+          onset karesi 1.0, hemen sonraki kare 'soft' (ör. 0.3), float32 döner.
+          dilate=2 onset tepe noktasını iki kareye yayıp başlangıç zamanını bulanıklaştırıyordu.
     """
     tab = np.asarray(tab)
     T, S = tab.shape
@@ -90,9 +94,35 @@ def string_onsets(tab, onset_roll=None, instrument: Instrument = STANDARD_6, dil
             ok = (p >= 0) & (p < onset_roll.shape[1])
             hit = act[ok][onset_roll[act[ok], p[ok]] > 0]
             on[hit, s] = 1
+    if soft is not None:
+        out = on.astype(np.float32)
+        nxt = np.zeros_like(out); nxt[1:] = on[:-1] * float(soft)
+        return np.maximum(out, nxt) * (tab > 0)
     if dilate > 1:
         base = on.copy()
         for k in range(1, dilate):
             on[k:] |= base[:-k]
         on &= (tab > 0)                      # sessiz karede onset olmaz
     return on
+
+
+def short_note_weights(tab, onset_mask, short_frames=5, short_weight=2.0):
+    """
+    Katman 3.10 Adım 2 — (T, S) kare ağırlığı: 'short_frames' kareden kısa notalara ait
+    karelere 'short_weight', diğerlerine 1. Notalar sınıf değişimi ya da onset ile bölünür.
+    (Ölçüm: kısa notaların ~%47-50'si kaçıyor.)
+    """
+    tab = np.asarray(tab); T, S = tab.shape
+    w = np.ones((T, S), np.float32)
+    for s in range(S):
+        t = 0
+        while t < T:
+            if tab[t, s] > 0:
+                a = t; t += 1
+                while t < T and tab[t, s] == tab[a, s] and not onset_mask[t, s]:
+                    t += 1
+                if t - a < short_frames:
+                    w[a:t, s] = short_weight
+            else:
+                t += 1
+    return w

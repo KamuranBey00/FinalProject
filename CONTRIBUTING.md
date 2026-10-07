@@ -90,6 +90,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `decoding/viterbi.py` | Perde matrisi, nota bulma (eşik tabanlı ve onset tabanlı), el yapımı Viterbi |
 | `decoding/transitions.py` | Veriden öğrenilen tel geçiş modeli ve Viterbi'si |
 | `evaluation/metrics.py` | Ortak metrikler (P/R/F1, tab F1, onset F1) |
+| `evaluation/pitch_eval.py` | Perde/nota değerlendirme çekirdeği: alan-içi kalibrasyon (GuitarSet→val, GAPS→gaps_val), çözümleme kuralı araması, 50/100 ms nota F1 |
 
 ### `scripts/` — çalıştırılan dosyalar
 | Dosya | Görevi |
@@ -108,6 +109,8 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `eval/eval_hmm.py` | Tel ataması teşhisi + uçtan uca tab F1 (**ana GuitarSet ölçümü**) + `--demo` |
 | `eval/eval_pitch.py` | Nota ve kare F1, polifoni kırılımı (GAPS ve GuitarSet) |
 | `eval/diagnose_strings.py` | Hata analizi: kayıp nereden geliyor, hangi teller karışıyor |
+| `eval/diagnose_pitch.py` | Katman 3.10: kaçan/hayalet notaların nedeni, süre/register/polifoni kırılımı |
+| `eval/check_gaps_labels.py` | Katman 3.10: GAPS `.match` eşleşme oranı ile model hatası ilişkisi |
 
 ### `checkpoints/`
 | Dosya | Katman | Not |
@@ -116,7 +119,8 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `tabcrnn_base.pt`, `tabcrnn_comp.pt`, `tabcrnn_aug.pt` | 3.7 | taban / +akor / +çoğaltma (zararlı çıktı) |
 | `tabcrnn_gaps.pt` | 3.8 | + GAPS ince ayarı |
 | `tabcrnn_onset.pt` | 3.9 | + onset kafası |
-| **`tabcrnn_onset_h.pt`** | 3.9 | **güncel en iyi**: + harmonik istifleme |
+| **`tabcrnn_onset_h.pt`** | 3.9 | Katman 3.9 tabanı: + harmonik istifleme (GS tab F1 0.743, kurallar + mix) |
+| `tabcrnn_poly.pt` | 3.10 | + keskin onset, GuitarSet perde kaybı, kısa nota ağırlığı (akorlarda +0.014/+0.017; tab F1 ölçümü bekleniyor) |
 | `transitions.npz` | 3.6b | öğrenilen tel geçiş modeli |
 
 ## Çalışma kuralları

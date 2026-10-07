@@ -57,6 +57,7 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
             print(f"  [{sp}] secim: perde esigi={t}, cozumleme="
                   f"{'kare-esik' if o is None else f'onset@{o}'}"
                   + (f", histerezis={dec['off_ratio']}, refrakter={dec['refractory']}, yedek={dec['fallback']}"
+                     f", tepe={dec.get('peak', False)}"
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
         return cal[sp]
 
@@ -78,14 +79,15 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
         summary.append((split, sp, thr, ot, r))
 
     print("\n" + "=" * 92)
-    print(f"{'split':<12}{'secim':<10}{'cozumleme':<14}{'esik':>5}{'nota F1':>10}{'kare F1':>10}   polifoni 1 / 2 / 3 / 4+")
-    print("-" * 92)
+    print(f"{'split':<12}{'secim':<10}{'cozumleme':<14}{'esik':>5}{'nota F1':>10}{'@100ms':>8}{'kare F1':>10}   polifoni 1 / 2 / 3 / 4+")
+    print("-" * 100)
     for split, sp, thr, ot, r in summary:
         pol = " / ".join(f"{r['poly'][g][2]:.2f}" if g in r["poly"] else "  - "
                          for g in ("1", "2", "3", "4+"))
         dec = "kare-esik" if ot is None else f"onset@{ot}"
-        print(f"{split:<12}{sp:<10}{dec:<14}{thr:>5}{r['note'][2]:>10.3f}{r['frame'][2]:>10.3f}   {pol}")
-    print("=" * 92)
+        print(f"{split:<12}{sp:<10}{dec:<14}{thr:>5}{r['note'][2]:>10.3f}{r['note100'][2]:>8.3f}{r['frame'][2]:>10.3f}   {pol}")
+    print("=" * 100)
+    print("@100ms = ayni secimle 100 ms onset toleransinda nota F1 (fark buyukse hata zamanlamada).")
     print("Esikler ve cozumleme yontemi yalnizca dogrulama split'lerinde secildi; test setlerine bakilmadi.")
 
 

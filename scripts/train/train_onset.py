@@ -26,6 +26,8 @@ giriş katmanı h=1 kanalına taşınır, diğer kanallar 0 -> başlangıçta in
     python -m scripts.train.train_onset --init tabcrnn_gaps.pt --epochs 15 --ckpt tabcrnn_onset.pt
     # Adım 2: + harmonik istifleme (Adım 1'in sonucundan başlar)
     python -m scripts.train.train_onset --init tabcrnn_onset.pt --harmonics default --epochs 15 --ckpt tabcrnn_onset_h.pt
+    # Katman 3.10 Adım 2: keskin onset + GuitarSet perde kaybı + kısa nota ağırlığı
+    python -m scripts.train.train_onset --init tabcrnn_onset_h.pt --epochs 15 --ckpt tabcrnn_poly.pt         --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0
 """
 
 import argparse
@@ -38,7 +40,7 @@ from gtab.data.gaps import gaps_files
 from gtab.data.tab_labels import n_tab_classes
 from gtab.data.torch_dataset import GuitarSetSeq, PitchSeq
 from gtab.evaluation.metrics import prf, PAD
-from gtab.models.losses import pitch_index, pitch_probs, pitch_onset_probs
+from gtab.models.losses import pitch_index, pitch_probs, pitch_onset_probs, tab_pitch_target
 from gtab.models.nets import TabCRNNOnset, DEFAULT_HARMONICS, warm_start_state
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import set_seed, get_device
@@ -70,7 +72,7 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
     t.update({("on", h): [0, 0, 0] for h in ONSET_THRS})
     t.update({("go", h): [0, 0, 0] for h in ONSET_THRS})
     with torch.no_grad():
-        for x, y, on, L in gs_val:
+        for x, y, on, _, L in gs_val:
             tab, ol = model.forward_both(x.to(device))
             pred = tab.argmax(-1).cpu(); po = torch.sigmoid(ol).cpu()
             valid = y[:, :, 0] != PAD
@@ -103,35 +105,44 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
 # ----------------------------------------------------------------- eğitim
 def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           onset_weight=1.0, pitch_weight=1.0, ckpt="tabcrnn_onset.pt", seed=1, pos_weight=3.0,
-          harmonics=None):
+          harmonics=None, onset_soft=None, gs_pitch_weight=0.0, short_frames=0, short_weight=1.0):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
     ncls = n_tab_classes(INSTR)
     idx = pitch_index(INSTR).to(device)
 
-    tab_ds = GuitarSetSeq(CACHE_DIR, tab_splits, CHUNK, onsets=True)
+    init_ck = torch.load(ckpt_path(init), map_location=device) if init else None
+    if harmonics is None and init_ck is not None and init_ck.get("harmonics"):
+        harmonics = tuple(init_ck["harmonics"])           # init'in giriş yapısını koru
+    print(f"Katman 3.10 Adim 2 secenekleri: onset_soft={onset_soft} | GuitarSet perde kaybi agirligi="
+          f"{gs_pitch_weight} | kisa nota: <{short_frames} kare x{short_weight}")
+    tab_ds = GuitarSetSeq(CACHE_DIR, tab_splits, CHUNK, onsets=True, onset_soft=onset_soft,
+                          short_frames=short_frames, short_weight=short_weight)
     tab_dl = DataLoader(tab_ds, batch_size=batch_size, shuffle=True)
-    gs_val = DataLoader(GuitarSetSeq(CACHE_DIR, "val", CHUNK, onsets=True), batch_size=batch_size)
+    gs_val = DataLoader(GuitarSetSeq(CACHE_DIR, "val", CHUNK, onsets=True, onset_soft=onset_soft),
+                        batch_size=batch_size)
     p_tr = gp_val = None
     if pitch_splits:
         tr_f, va_f = [], []
         for sp in pitch_splits:
             a, b = gaps_files(sp); tr_f += a; va_f += b
-        p_tr = DataLoader(PitchSeq(tr_f, CHUNK, onsets=True), batch_size=batch_size, shuffle=True)
-        gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True), batch_size=batch_size)
+        p_tr = DataLoader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft),
+                          batch_size=batch_size, shuffle=True)
+        gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft), batch_size=batch_size)
         print(f"perde: {len(tr_f)} train / {len(va_f)} val kaydi (icraciya gore ayrik)")
 
     model = TabCRNNOnset(INSTR.num_strings, ncls, harmonics=harmonics).to(device)
     print(f"model: TabCRNNOnset | harmonikler: {harmonics or 'yok (tek kanal CQT)'}")
     if init:
-        missing = warm_start_state(torch.load(ckpt_path(init), map_location=device)["model"], model)
+        missing = warm_start_state(init_ck["model"], model)
         assert all(k.startswith("onset_head") for k in missing), missing
         print(f"baslangic: {init}" + (" (onset kafasi sifirdan)" if missing else "")
-              + (" | giris katmani harmoniklere genisletildi (h=1 = eski agirlik)" if harmonics else ""))
+              + (" | giris katmani harmoniklere genisletildi (h=1 = eski agirlik)"
+                 if harmonics and not init_ck.get("harmonics") else ""))
 
     w = tab_ds.class_weights(ncls, scheme="inv", cap=20.0).to(device)
-    ce = torch.nn.CrossEntropyLoss(weight=w, ignore_index=PAD)
+    ce = torch.nn.CrossEntropyLoss(weight=w, ignore_index=PAD, reduction="none")
     bce = torch.nn.BCELoss(reduction="none")
     # seyrek onset pozitiflerini dengele (karelerin ~%5'i)
     bce_logit = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=torch.tensor(pos_weight, device=device))
@@ -142,7 +153,8 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
 
     def save():
         torch.save({"model": model.state_dict(), "n_classes": ncls, "onset": True,
-                    "onset_thr": state.get("thr"), "harmonics": list(harmonics) if harmonics else None}, ckpt)
+                    "onset_thr": state.get("thr"), "harmonics": list(harmonics) if harmonics else None,
+                    "onset_soft": onset_soft}, ckpt)
 
     def score(ep, logs):
         m, bt = evaluate(model, gs_val, gp_val, idx, device)
@@ -156,17 +168,26 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     best = score(0, {}); state["thr"] = state["cur_thr"]; save()
     for ep in range(1, epochs + 1):
         model.train()
-        sums = dict(tab=0.0, on=0.0, perde=0.0, ponset=0.0); n = 0
+        sums = dict(tab=0.0, on=0.0, gsperde=0.0, perde=0.0, ponset=0.0); n = 0
         p_iter = iter(p_tr) if p_tr is not None else None
-        for x, y, on, _ in tab_dl:
-            x, y, on = x.to(device), y.to(device), on.to(device)
+        for x, y, on, wt, _ in tab_dl:
+            x, y, on, wt = x.to(device), y.to(device), on.to(device), wt.to(device)
             tab, ol = model.forward_both(x)
             B, L, S, C = tab.shape
-            l_tab = ce(tab.reshape(-1, C), y.reshape(-1))
+            # tel CE: sınıf ağırlığı x kısa nota ağırlığı (wt=1 -> eski ağırlıklı ortalama, birebir)
+            yv = y.reshape(-1); cw = w[yv.clamp(min=0)] * (yv != PAD)
+            l_tab = (ce(tab.reshape(-1, C), yv) * wt.reshape(-1)).sum() / (cw * wt.reshape(-1)).sum()
             valid = (y[:, :, 0] != PAD).unsqueeze(-1).float()
-            l_on = (bce_logit(ol, on) * valid).sum() / (valid.sum() * S)
+            l_on = (bce_logit(ol, on) * valid * wt).sum() / (valid.sum() * S)
             loss = l_tab + onset_weight * l_on
             sums["tab"] += l_tab.item(); sums["on"] += l_on.item()
+            if gs_pitch_weight > 0:                    # GuitarSet'e doğrudan perde kaybı
+                pt = tab_pitch_target(y, idx)
+                pp_gs = pitch_probs(tab, idx).clamp(1e-6, 1 - 1e-6)
+                fm = valid.squeeze(-1)
+                l_gp = (bce(pp_gs, pt).mean(-1) * fm).sum() / fm.sum()
+                loss = loss + gs_pitch_weight * l_gp
+                sums["gsperde"] += l_gp.item()
             if p_iter is not None:
                 try:
                     xg, fg, og, Lg = next(p_iter)
@@ -201,10 +222,18 @@ if __name__ == "__main__":
     ap.add_argument("--pitch-weight", type=float, default=1.0)
     ap.add_argument("--ckpt", default="tabcrnn_onset.pt")
     ap.add_argument("--pos-weight", type=float, default=3.0, help="onset BCE pozitif agirligi")
-    ap.add_argument("--harmonics", default="", help="Adim 2: ornek '0.5,1,2,3,4,5' ya da 'default'; bos = tek kanal")
+    ap.add_argument("--harmonics", default="", help="ornek '0.5,1,2,3,4,5' ya da 'default'; bos = init'teki ayar")
+    # Katman 3.10 Adim 2 (varsayilanlar = Katman 3.9 egitimi, birebir)
+    ap.add_argument("--onset-soft", type=float, default=None,
+                    help="keskin onset hedefi: tepe karesi 1, sonraki kare bu deger (or. 0.3); bos = eski dilate=2")
+    ap.add_argument("--gs-pitch-weight", type=float, default=0.0, help="GuitarSet'e dogrudan perde (noisy-OR) BCE agirligi")
+    ap.add_argument("--short-frames", type=int, default=0, help="bu kareden kisa notalar agirlikli (0 = kapali)")
+    ap.add_argument("--short-weight", type=float, default=1.0, help="kisa nota agirligi")
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
           a.onset_weight, a.pitch_weight, a.ckpt, pos_weight=a.pos_weight,
           harmonics=(DEFAULT_HARMONICS if a.harmonics == "default"
-                     else tuple(float(h) if "." in h else int(h) for h in a.harmonics.split(",")) if a.harmonics else None))
+                     else tuple(float(h) if "." in h else int(h) for h in a.harmonics.split(",")) if a.harmonics else None),
+          onset_soft=a.onset_soft, gs_pitch_weight=a.gs_pitch_weight,
+          short_frames=a.short_frames, short_weight=a.short_weight)

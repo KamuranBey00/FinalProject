@@ -123,7 +123,7 @@ class GuitarSetSeq(Dataset):
     PAD = -100
 
     def __init__(self, cache_dir, split, chunk=200, augment=False, num_frets=24,
-                 bins_per_semitone=2, onsets=False):
+                 bins_per_semitone=2, onsets=False, onset_soft=None, short_frames=0, short_weight=1.0):
         """
         split: tek split ("train") ya da liste (["train", "train_comp"]) -- Katman 3.7.
         augment: True ise her chunk'a rastgele CQT-uzayı çoğaltma (sadece EĞİTİMDE).
@@ -133,6 +133,7 @@ class GuitarSetSeq(Dataset):
         self.chunk = chunk
         self.with_onsets = onsets
         self.onsets = []
+        self.weights = []                  # Katman 3.10: kısa nota ağırlığı (onsets=True iken)
         self.augment = augment
         self.num_frets = num_frets
         self.bps = bins_per_semitone
@@ -150,8 +151,12 @@ class GuitarSetSeq(Dataset):
                 raise KeyError(f"{path} icinde 'tab' yok. build_tab_labels.py calisti mi?")
             cqt = _normalize(d["cqt"]); tab = d["tab"].astype(np.int64)
             if onsets:
-                from gtab.data.tab_labels import string_onsets
-                on_all = string_onsets(tab, d["onset"] if "onset" in d else None)
+                from gtab.data.tab_labels import string_onsets, short_note_weights
+                roll = d["onset"] if "onset" in d else None
+                on_all = string_onsets(tab, roll, soft=onset_soft)
+                w_all = (short_note_weights(tab, string_onsets(tab, roll, dilate=1) > 0,
+                                            short_frames, short_weight)
+                         if short_frames > 0 else np.ones(tab.shape, np.float32))
             T, n_bins = cqt.shape
             for start in range(0, T, chunk):
                 c = cqt[start:start + chunk]; tb = tab[start:start + chunk]
@@ -162,9 +167,12 @@ class GuitarSetSeq(Dataset):
                     c, tb = pc, pt
                 self.items.append((c, tb, L))
                 if onsets:
-                    on = np.zeros((chunk, tab.shape[1]), np.uint8)
+                    on = np.zeros((chunk, tab.shape[1]), np.float16)
                     on[:L] = on_all[start:start + chunk]
                     self.onsets.append(on)
+                    wt = np.ones((chunk, tab.shape[1]), np.float16)
+                    wt[:L] = w_all[start:start + chunk]
+                    self.weights.append(wt)
 
     def __len__(self): return len(self.items)
 
@@ -174,7 +182,8 @@ class GuitarSetSeq(Dataset):
             c, tb = self._augment(c, tb)
         if self.with_onsets:
             return (torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb),
-                    torch.from_numpy(self.onsets[i].astype(np.float32)), L)
+                    torch.from_numpy(self.onsets[i].astype(np.float32)),
+                    torch.from_numpy(self.weights[i].astype(np.float32)), L)
         return torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb), L
 
     # ------------------------------------------------------------ Katman 3.7
@@ -235,7 +244,7 @@ class PitchSeq(Dataset):
     Çıktı: (1, L, n_bins) cqt, (L, P) frame, gerçek uzunluk L.
     """
 
-    def __init__(self, files, chunk=200, onsets=False, dilate=2):
+    def __init__(self, files, chunk=200, onsets=False, dilate=2, onset_soft=None):
         """onsets: True ise perde onset roll'u da verilir -> (x, frame, onset (L,P), L)."""
         self.items = []
         self.with_onsets = onsets
@@ -245,7 +254,10 @@ class PitchSeq(Dataset):
                 cqt = _normalize(d["cqt"]).astype(np.float16)
                 fr = d["frame"].astype(np.uint8)
                 on_all = d["onset"].astype(np.uint8) if onsets else None
-            if onsets and dilate > 1:                 # tel onset'iyle aynı tolerans
+            if onsets and onset_soft is not None:     # Katman 3.10: keskin hedef (tepe 1, sonraki kare soft)
+                o1 = on_all.astype(np.float32); nx = np.zeros_like(o1); nx[1:] = o1[:-1] * float(onset_soft)
+                on_all = np.maximum(o1, nx) * fr
+            elif onsets and dilate > 1:               # tel onset'iyle aynı tolerans
                 base = on_all.copy()
                 for k in range(1, dilate):
                     on_all[k:] |= base[:-k]
@@ -259,7 +271,7 @@ class PitchSeq(Dataset):
                     f = np.vstack([f, np.zeros((chunk - L, f.shape[1]), np.uint8)])
                 self.items.append((c, f, L))
                 if onsets:
-                    o = np.zeros((chunk, fr.shape[1]), np.uint8); o[:L] = on_all[s:s + chunk]
+                    o = np.zeros((chunk, fr.shape[1]), np.float16); o[:L] = on_all[s:s + chunk]
                     self.onsets.append(o)
 
     def __len__(self):

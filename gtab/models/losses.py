@@ -49,3 +49,12 @@ def pitch_onset_probs(logits, onset_logits, idx):
     g = g * valid.to(g.dtype) * torch.sigmoid(onset_logits).unsqueeze(-1)
     log_none = torch.log1p(-g.clamp(max=1 - 1e-6)).sum(2)
     return 1.0 - torch.exp(log_none)
+
+
+def tab_pitch_target(y, idx):
+    """
+    Katman 3.10 Adım 2 — tab etiketi (B,L,S) (0 = sessiz, -100 = dolgu) -> (B,L,P) perde hedefi.
+    GuitarSet'e de GAPS'teki gibi doğrudan perde (noisy-OR) kaybı uygulamak için.
+    """
+    hit = (y.unsqueeze(-1) == idx.view(1, 1, *idx.shape)) & (idx >= 0).view(1, 1, *idx.shape)
+    return hit.any(2).float()

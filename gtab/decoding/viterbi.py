@@ -228,7 +228,8 @@ def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
 
 
 def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
-                        min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0):
+                        min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
+                        peak=False):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -244,6 +245,8 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
       - fallback   > 0: hiçbir notanın kapsamadığı, 'fallback' kare boyunca 'threshold'
                        üstünde kalan perde onset'siz de nota sayılır -> onset kaçınca
                        notanın tamamen düşmesi.
+      - peak=True    : nota, onset eşiği üstündeki koşunun TEPE karesinden başlar
+                       (yükselen kenardan değil) -> başlangıç zamanlaması (Adım 2).
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -254,6 +257,14 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
     notes = []
     for p in range(P):
         st = list(np.nonzero(starts[:, p])[0])
+        if peak and st:
+            adj = []
+            for s_ in st:
+                e_ = s_
+                while e_ < T and on[e_, p]:
+                    e_ += 1
+                adj.append(s_ + int(np.argmax(onset_mat[s_:e_, p])))
+            st = adj
         if refractory > 0 and len(st) > 1:
             kept = [st[0]]
             for s_ in st[1:]:

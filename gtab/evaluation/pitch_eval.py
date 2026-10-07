@@ -78,8 +78,11 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None):
     if len(ref) and len(est):
         matched = len(mir_eval.transcription.match_notes(ri, rp, ei, ep, onset_tolerance=0.05,
                                                           offset_ratio=None))
+        # Katman 3.10 kontrolü: 100 ms toleransla (zamanlama hatası mı, perde hatası mı?)
+        matched100 = len(mir_eval.transcription.match_notes(ri, rp, ei, ep, onset_tolerance=0.10,
+                                                             offset_ratio=None))
     else:
-        matched = 0
+        matched = matched100 = 0
 
     poly = {}
     k = frame.sum(1)
@@ -87,19 +90,21 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None):
         if mask.any():
             pf, ff = pred[mask], frame[mask]
             poly[name] = (int((pf & ff).sum()), int((pf & ~ff).sum()), int((~pf & ff).sum()))
-    return {"frame": (tp, fp, fn), "note": (matched, len(est), len(ref)), "poly": poly}
+    return {"frame": (tp, fp, fn), "note": (matched, len(est), len(ref)),
+            "note100": (matched100, len(est), len(ref)), "poly": poly}
 
 
 def aggregate(results):
-    F = np.zeros(3); N = np.zeros(3); poly = {}
+    F = np.zeros(3); N = np.zeros(3); N100 = np.zeros(3); poly = {}
     for r in results:
-        F += r["frame"]; N += r["note"]
+        F += r["frame"]; N += r["note"]; N100 += r["note100"]
         for g, v in r["poly"].items():
             poly[g] = poly.get(g, np.zeros(3)) + v
-    m, ne, nr = N
-    note = (m / max(ne, 1), m / max(nr, 1))
-    note = note + (2 * note[0] * note[1] / max(note[0] + note[1], 1e-9),)
-    return {"frame": prf(*F), "note": note, "poly": {g: prf(*v) for g, v in poly.items()}}
+    def nprf(m, ne, nr):
+        p, r = m / max(ne, 1), m / max(nr, 1)
+        return (p, r, 2 * p * r / max(p + r, 1e-9))
+    return {"frame": prf(*F), "note": nprf(*N), "note100": nprf(*N100),
+            "poly": {g: prf(*v) for g, v in poly.items()}}
 
 
 def load_split(split, model, ck, kind, device, limit=None):
@@ -137,6 +142,7 @@ def selection_split(split, select_split):
 DEC_GRID = [dict(off_ratio=o, refractory=r, fallback=f)
             for o in (1.0, 0.7, 0.5) for r in (0, 3, 6) for f in (0, 10)]
 NO_DEC = dict(off_ratio=1.0, refractory=0, fallback=0)          # = Katman 3.9 davranışı
+# Adım 2: kurallar seçildikten sonra "onset tepe noktasından başlat" ayrıca denenir
 
 
 def score(r, criterion="note"):
@@ -173,4 +179,9 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note"):
             t = max(sel, key=lambda t: score(sel[t], criterion))
             if score(sel[t], criterion) > best[0]:
                 best = (score(sel[t], criterion), t, ot, dict(dec))
+        if best[2] is not None:                    # tepe noktasından başlatma (Adım 2)
+            dec = dict(best[3], peak=True)
+            sel = evaluate_split(data, thresholds=[best[1]], onset_thr=best[2], dec=dec)
+            if score(sel[best[1]], criterion) > best[0]:
+                best = (score(sel[best[1]], criterion), best[1], best[2], dec)
     return best

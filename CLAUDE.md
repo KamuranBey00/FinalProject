@@ -39,7 +39,7 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
 - `data/` git'e girmez. Kaynaklar README'lerde; önbellek `scripts/data/*` ile üretilir.
 - Disk ~73 GB boş: SynthTab'den yalnızca sınırlı naylon (`luthier_*`) alt küme.
 
-## Güncel durum (6 Ekim 2026 itibarıyla)
+## Güncel durum (7 Ekim 2026 itibarıyla)
 - **Katman 3.9** (`docs/devlog/README10.md`), dal `katman-3.9-tel-tinisi` (GitHub'da).
 - **En iyi model: `checkpoints/tabcrnn_onset_h.pt`** (TabCRNN + onset kafası +
   harmonik istifleme; tabcrnn_gaps.pt'den ince ayar). GuitarSet solo tab F1 0.739,
@@ -57,13 +57,20 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   - Bulgu: kurallar kuyruk kaybını ve onset kaçınca düşen notaları düzeltti ama kurtarılan
     notalar kayık başlıyor ("onset zamanı kaymış" %10→%21 / %11→%29). Akor "aynı perde"
     hayaletleri çift tetik değil, onset zamanlama hatası. GAPS hayaletlerinin %70'i yanlış perde.
-  - **Bekleyen (kullanıcı çalıştıracak):** GS solo tab F1 kontrolü
-    `python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_onset_h.pt --refractory 6 --fallback 10`
-    (taban 0.739). Düşmezse "kurallar + mix" yeni çözümleme varsayılanı.
-  - **Sıradaki (onay verildi, kod yazılacak):** Adım 2 öncesi iki eğitimsiz kontrol
-    (100 ms onset toleransı; GAPS `.match` etiket kalitesi), sonra tek ince ayar koşusu:
-    (1) keskin onset hedefi (dilate=2 → tek kare + yumuşak komşu, tepe noktasından başlatma),
-    (2) GuitarSet'e doğrudan noisy-OR perde BCE, (3) kısa nota/onset karesi ağırlığı.
+  - Adım 1 kararı (7 Ekim): GS solo tab F1 0.743 (taban 0.739) → "kurallar + mix" varsayılan.
+  - **Adım 2 ölçüldü (7 Ekim):** `tabcrnn_poly.pt` (init onset_h; `--onset-soft 0.3 --gs-pitch-weight 1.0
+    --short-frames 5 --short-weight 2.0`). Kurallar + mix ile: GAPS 0.582/0.656, val_comp 0.744/0.817,
+    GS val 0.905/0.869 (taban C: 0.588/0.641, 0.730/0.800, 0.907/0.865). Recall düzeldi ("hiç duyulmayan
+    perde" −%32), **darboğaz artık precision**: hayaletler arttı (val_comp P 0.69, GAPS P 0.49).
+    2a: @100ms farkı küçük (+0.006…+0.022) → hata küçük kayma değil, muhtemelen nota parçalanması;
+    GAPS `.match` kalite ölçüsü olarak güvenilmez, etiket gürültüsü kanıtı yok.
+    Çıkış ölçütü sağlanmadı; katman sürüyor.
+  - **Bekleyen (kullanıcı çalıştıracak):** GS solo tab F1 →
+    `python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --off-ratio 1.0 --refractory 6 --fallback 10 --peak`
+    ≥ 0.733 ise tabcrnn_poly yeni çalışma tabanı.
+  - **Sıradaki: Adım 3 (README11)** — hayalet/precision: 3a diagnose_pitch'e hayalet alt kırılımı
+    (fragman / geç-erken başlangıç / hangi kural / onset tepe değeri), 3b eğitimsiz fragman birleştirme
+    ve yeniden vuruş eşiği, 3c gerekirse eğitim (onset pos_weight 3→1, offset kafası, sert negatif).
 - Tel tarafı (gerekirse): A teli 0.66; adaylar 36 bin/oktav önbellek, hex öğretmen
   damıtması, SynthTab naylon + GAPS partisyon TAB etiketleri (`.match`).
 - **Denenmiş, işe yaramayan (tekrarlama):** el yapımı Viterbi hareket maliyeti;

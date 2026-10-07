@@ -292,11 +292,12 @@ if __name__ == "__main__":
     ap.add_argument("--onset-thr", type=float, default=None, help="onset esigi (bos = checkpoint'teki); -1 = kare-esik cozumlemesi")
     ap.add_argument("--off-ratio", type=float, default=1.0, help="Katman 3.10 histerezis (eval_pitch'in sectigi deger)")
     ap.add_argument("--refractory", type=int, default=0, help="Katman 3.10 refrakter pencere (kare)")
+    ap.add_argument("--peak", action="store_true", help="Katman 3.10 Adim 2: notayi onset tepe noktasindan baslat")
     ap.add_argument("--fallback", type=int, default=0, help="Katman 3.10 onset'siz yedek nota (kare)")
     args = ap.parse_args()
     if args.demo:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak)
         demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback)
+        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak)
         main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)

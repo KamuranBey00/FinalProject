@@ -172,6 +172,111 @@ Eğitimden önce kısa ve eğitimsiz iki kontrol:
 - **GAPS etiket kalitesi:** yanlış perde hayaletlerinin (%70) ne kadarının etiket gürültüsü
   olduğunu görmek için örnek kayıtlarda `.match` silme/ekleme oranlarına bakmak.
 
+### Adım 1 kararı (7 Ekim 2026)
+GS solo tab F1, GuitarSet'te seçilen kurallarla (onset@0.3, refrakter 6, yedek 10):
+greedy **0.743** (taban 0.739) → kayıp yok. **"Kurallar + mix" varsayılan çözümleme oldu.**
+Öğrenilen geçiş önseli yine katkısız (w_tr = 0).
+
+## Adım 2 — uygulandı (kod + testler; kullanıcının koşusu bekleniyor)
+### 2a. Eğitimsiz iki kontrol
+1. **Zamanlama:** `eval_pitch` özet tablosunda yeni `@100ms` sütunu = aynı seçimle 100 ms onset
+   toleransında nota F1. 50 ms ile farkı büyükse hata gerçekten zamanlama.
+2. **GAPS etiket kalitesi:** `scripts/eval/check_gaps_labels.py`. `.match` dosyasından parça
+   başına partisyon–performans eşleşme oranı; modelin parça başına nota F1/precision'ı ile
+   Spearman korelasyonu. Yalnızca test dışı parçalar (52: eğitim 47 + gaps_val 5); hiçbir
+   parametre seçilmez. Not: duman testindeki parçada eşleşme oranı 0.10 iken model F1 0.65 —
+   `.match` her parçada etiket kalitesini yansıtmıyor olabilir (ör. partisyondaki tekrarlar);
+   sonuç dikkatle yorumlanacak.
+
+### 2b. Tek ince ayar koşusu (`train_onset`, yeni seçenekler; varsayılanlar = 3.9 eğitimi birebir)
+| Seçenek | Ne yapar | Hedef (Adım 1 bulgusu) |
+|---|---|---|
+| `--onset-soft 0.3` | onset hedefi: tepe karesi 1, sonraki kare 0.3 (eskiden iki kare de 1) | kayık başlangıçlar %21 / %29 |
+| `--gs-pitch-weight 1.0` | GuitarSet'e doğrudan noisy-OR perde BCE (`tab_pitch_target`) | duyulmayan perdeler %36 / %39, oktav/harmonik %29 / %19 |
+| `--short-frames 5 --short-weight 2.0` | 5 kareden kısa notaların karelerine 2× ağırlık (tel CE + onset) | kısa notaların %47 / %50 kaçması |
+| çözümleme `peak` | nota onset koşusunun tepe karesinden başlar; kalibrasyonda otomatik denenir | kayık başlangıçlar |
+
+Init modelin harmonik ayarı checkpoint'ten otomatik okunur (`tabcrnn_onset_h.pt`'nin 6 kanalı korunur).
+
+Testler: keskin hedef / kısa nota ağırlığı / perde hedefi / tepe başlangıcı birim testleri ✓;
+yeni seçenekler kapalıyken eval sonuçları birebir aynı (gaps_test 0.530/0.627, val 0.880/0.853) ✓;
+1 epoch eğitim duman testi ✓ (onset F1 artık tek kare hedefe göre ölçüldüğü için eğitim
+logundaki GS-onsetF1, 3.9 koşularıyla doğrudan kıyaslanamaz — karar eval_pitch ile verilir).
+
+### Çalıştırma (sırayla)
+```bash
+# 2a — kontroller (mevcut model)
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_onset_h.pt --splits gaps_test val val_comp --criterion mix
+python -m scripts.eval.check_gaps_labels --ckpt tabcrnn_onset_h.pt
+
+# 2b — ince ayar (yeni dosya; tabcrnn_onset_h.pt korunur)
+python -m scripts.train.train_onset --init tabcrnn_onset_h.pt --epochs 15 --ckpt tabcrnn_poly.pt --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0
+
+# 2b — ölçüm
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_poly.pt --splits gaps_test val val_comp --criterion mix
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_poly.pt --splits val_comp gaps_val --criterion mix
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_poly.pt --refractory <val> --fallback <val> [--off-ratio <val>] [--peak]
+```
+(eval_hmm değerleri: eval_pitch çıktısındaki `[val] secim:` satırından.)
+
+Karşılaştırma tabanı (C: kurallar + mix, tabcrnn_onset_h): GAPS 0.588 / 0.641, GS val 0.907 / 0.865,
+val_comp 0.730 / 0.800, GS solo tab F1 0.743.
+
+## Adım 2 sonuçları (7 Ekim 2026)
+### 2a — kontroller (tabcrnn_onset_h)
+**Zamanlama (`@100ms`):** gaps_test 0.588 → 0.610, GS val 0.907 → 0.916, val_comp 0.730 → 0.736.
+Toleransı ikiye katlamak yalnızca +0.006 … +0.022 kazandırıyor → "onset zamanı kaymış"
+kaçanların çoğu 50–100 ms'lik küçük kayma **değil**; nota daha geç/erken başlıyor ya da
+**parçalanıyor** (aynı notanın ikinci parçası). Keskin onset hipotezi zayıf destek aldı.
+
+**GAPS etiket kalitesi (`check_gaps_labels`, 52 test dışı parça):** eşleşme oranı tüm parçalarda
+çok düşük (medyan 0.11, 0.04–0.21) → `.match` bu veri için güvenilir bir kalite ölçüsü değil.
+Spearman(eşleşme, nota F1) +0.22, (eşleşme, precision) +0.05 → etiket gürültüsünün GAPS
+hayaletlerini açıkladığına dair **kanıt yok**; hatalar büyük ölçüde modelde kabul edilir.
+
+### 2b — `tabcrnn_poly.pt` (keskin onset + GuitarSet perde kaybı + kısa nota ağırlığı)
+| (kurallar + mix) | GAPS nota | GAPS kare | GS val nota | GS val kare | val_comp nota | val_comp kare |
+|---|---|---|---|---|---|---|
+| tabcrnn_onset_h (taban C) | **0.588** | 0.641 | **0.907** | 0.865 | 0.730 | 0.800 |
+| **tabcrnn_poly** | 0.582 | **0.656** | 0.905 | **0.869** | **0.744** | **0.817** |
+| fark | −0.006 | +0.015 | −0.002 | +0.004 | +0.014 | +0.017 |
+
+Polifoni kare F1 (2 / 3 / 4+ nota): GAPS 0.66/0.66/0.65 → 0.68/0.68/0.66; val_comp 0.70/0.80/0.85 → 0.70/0.82/0.87.
+Eğitim logu (argmax tab F1, GS val): 0.658 → 0.685. GuitarSet çözümlemesinde ilk kez `tepe=True` seçildi.
+**GS solo tab F1 henüz ölçülmedi** (aşağıdaki komut).
+
+diagnose_pitch (taban → poly):
+| | val_comp | gaps_val |
+|---|---|---|
+| kaçan gerçek nota | %22.7 → **%18.9** | %36.3 → **%33.8** |
+| "perde hiç aktif değil" (adet) | 540 → **365** | 4004 → **3715** |
+| oktav/harmonik (adet) | 431 → 389 | 2011 → 2170 |
+| zamanı kaymış (adet) | 314 → 287 | 2977 → 2801 |
+| hayalet (tahminlerin) | %30.8 → %31.3 (2246 → 2415 adet) | %47.2 → %49.1 (16191 → 18226) |
+| kare kaybı nota sonunda | %31 → %27 | %57 → %57 |
+
+Yorum:
+- **Recall tarafı düzeldi:** GuitarSet'e doğrudan perde kaybı en çok "hiç duyulmayan perde"yi
+  azalttı (−%32 akorlarda); kısa notaların kaçma oranı %47 → %44.
+- **Darboğaz artık precision (hayaletler):** hayalet sayısı iki sette de arttı. val_comp nota P 0.69 /
+  R 0.81, GAPS P 0.49 / R 0.71. Muhtemel nedenler: onset `pos_weight=3` + kısa nota ağırlığı +
+  yedek kural daha çok nota başlatıyor; akorlarda hayaletlerin %67'si hâlâ "aynı perde" ve
+  100 ms testi bunların küçük kayma olmadığını gösteriyor → **nota parçalanması** adayı.
+- Kazanç gerçek ama küçük; çıkış ölçütü (taban C'ye göre nota +0.05 / kare +0.03) **sağlanmadı**.
+  Karar bekleyen: tab F1 ≥ 0.733 ise `tabcrnn_poly.pt` Katman 3.10'un yeni çalışma tabanı olur.
+
+## Adım 3 — plan: precision (hayaletler)
+**3a. Ölçüm (eğitim yok):** diagnose_pitch'e hayalet alt kırılımı:
+(i) aynı perdede eşleşmiş bir gerçek notanın İÇİNDE başlayan parça (fragman),
+(ii) gerçek notadan önce/sonra başlayan ama eşleşmeyen nota (geç/erken başlangıç),
+(iii) hangi kural üretti (onset / yedek kural), (iv) hayaletin onset tepe değeri dağılımı.
+**3b. Eğitimsiz:** bulguya göre çözümleme — fragman birleştirme (aynı perdede kısa boşluk + zayıf
+onset tepe noktası → tek nota), "yeniden vuruş" için daha yüksek onset eşiği, yedek kuralın
+yalnızca onset'siz bölgelerde uzun aktivasyonla sınırlanması. Hepsi doğrulamada seçilir.
+**3c. Eğitim (gerekirse):** onset `--pos-weight 3 → 1` (fazla onset → hayalet), sunumdaki
+"offset" modülü (nota sonu kafası) ile parçalanmanın modellenmesi, GAPS harmonik/oktav
+hayaletleri için sert negatif ağırlık.
+
 ## Katman 3.10 çıkış ölçütü ("ciddi iyileşme")
 `tabcrnn_onset_h` tabanına göre (aynı kalibrasyon ve ölçütle):
 - val_comp nota F1 ≥ +0.05 ve val_comp kare F1 ≥ +0.03
@@ -181,4 +286,8 @@ Eğitimden önce kısa ve eğitimsiz iki kontrol:
 ## Durum
 - [x] Adım 0 — ölçüm (diagnose_pitch)
 - [x] Adım 1 — çözümleme kuralları + mix ölçütü: GAPS'te kazanç, GuitarSet akorlarda nötr (GS tab F1 kontrolü bekleniyor)
-- [ ] Adım 2 — eğitim (Adım 1 sonuçlarına göre)
+- [x] Adım 1 kararı: kurallar + mix varsayılan (GS tab F1 0.743)
+- [x] Adım 2 — kontroller + ince ayar seçenekleri: kod + testler
+- [x] Adım 2 — sonuçlar: tabcrnn_poly (val_comp +0.014/+0.017, GAPS kare +0.015); recall düzeldi, darboğaz precision
+- [ ] GS solo tab F1 (tabcrnn_poly) ölçümü
+- [ ] Adım 3 — hayalet (precision) analizi ve çözümü
