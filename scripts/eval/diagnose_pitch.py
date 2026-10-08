@@ -40,7 +40,7 @@ import mir_eval
 import numpy as np
 
 from gtab.core.instrument import STANDARD_6
-from gtab.decoding.viterbi import pitch_matrix, pitch_onset_matrix, segment
+from gtab.decoding.viterbi import pick_peaks, pitch_matrix, pitch_onset_matrix, segment
 from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, load_split, roll_to_notes,
                                         selection_split, to_mir)
 from gtab.models.inference import load_model
@@ -78,11 +78,14 @@ def analyse(data, thr, ot, dec=None):
     re_ok, re_gh = [], []                        # yalnız "yeniden vuruş" notaları
     rep_tot = Counter(); rep_miss = Counter(); rep_buried = 0; rep_n = 0
     rise_buried, rise_sustain, rise_re_ok, rise_re_gh = [], [], [], []
+    vis = {k: Counter() for k, _, _ in VIS_KEYS}; vis_tot = Counter()
+    vis_miss = Counter(); vis_miss_vis = Counter(); peaks_cache = {}
 
     for probs, ons, frame, onset, *rest in data:
         rise = rest[0] if rest else None
         offs = rest[1] if len(rest) > 1 and rest[1] is not None else None
-        pm, _ = pitch_matrix(probs, INSTR)
+        comb = (dec or {}).get("combine", "max")
+        pm, _ = pitch_matrix(probs, INSTR, comb)
         n = min(len(pm), len(frame))
         pm, fr, on = pm[:n], frame[:n] > 0, onset[:n] > 0
         est = segment(probs[:n], None if ons is None else ons[:n], thr, ot, INSTR,
@@ -133,7 +136,7 @@ def analyse(data, thr, ot, dec=None):
                 miss_by[k][v] += 1
 
         # ---- D) hayalet alt kırılımı + onset tepe değerleri
-        om = pitch_onset_matrix(probs[:n], ons[:n], INSTR) if ons is not None else None
+        om = pitch_onset_matrix(probs[:n], ons[:n], INSTR, comb) if ons is not None else None
         no_fb = None
         if dec and dec.get("fallback", 0) and ot is not None:
             no_fb = {(e[0], e[2]) for e in segment(probs[:n], ons[:n], thr, ot, INSTR,
@@ -201,6 +204,31 @@ def analyse(data, thr, ot, dec=None):
                     (rise_re_ok if j in m_est else rise_re_gh).append(rmax(a, p))
                 ends[p] = b
 
+        # ---- F) tepe görünürlüğü (Katman 3.11 Adım 0): modelin onset eğrisinde gerçek notanın
+        #      ±1 karesinde ayrı bir yerel tepe var mı? (eşik = seçili onset eşiği)
+        if ons is not None and ot is not None:
+            oms = {c: pitch_onset_matrix(probs[:n], ons[:n], INSTR, c) for c in ("max", "noisyor")}
+            prev_e = {}; prev_a = {}
+            for i, (a, b, p) in enumerate(ref):
+                if p in prev_e and a - prev_e[p] <= 3:
+                    ioi = (a - prev_a[p]) / 43.07 * 1000
+                    cat = "<100 ms" if ioi < 100 else ("100-200 ms" if ioi < 200 else ">=200 ms")
+                else:
+                    cat = "tekrarsiz"
+                prev_e[p] = b; prev_a[p] = a
+                vis_tot[cat] += 1
+                hit = False
+                for key, c, pr in VIS_KEYS:
+                    pk = peaks_cache.setdefault((id(probs), key, p),
+                                                np.array(pick_peaks(oms[c][:, p - lo], ot, 1, pr)))
+                    v = bool(len(pk)) and np.abs(pk - a).min() <= 1
+                    vis[key][cat] += v
+                    if key == VIS_MAIN:
+                        hit = v
+                if i not in m_ref:
+                    vis_miss[cat] += 1
+                    vis_miss_vis[cat] += hit
+
         # ---- B) hayalet notalar
         for j, (a, b, p) in enumerate(est):
             if j in m_est:
@@ -232,7 +260,33 @@ def analyse(data, thr, ot, dec=None):
                 re_ok=np.array(re_ok), re_gh=np.array(re_gh),
                 rep_tot=rep_tot, rep_miss=rep_miss, rep_buried=rep_buried, rep_n=rep_n,
                 rise_buried=np.array(rise_buried), rise_sustain=np.array(rise_sustain),
-                rise_re_ok=np.array(rise_re_ok), rise_re_gh=np.array(rise_re_gh))
+                rise_re_ok=np.array(rise_re_ok), rise_re_gh=np.array(rise_re_gh),
+                vis=vis, vis_tot=vis_tot, vis_miss=vis_miss, vis_miss_vis=vis_miss_vis)
+
+
+# Katman 3.11 Adım 0: görünürlük ölçüsü = (ad, birleştirme, vadi derinliği); en az ara 1 kare
+VIS_KEYS = (("max / vadi 0.10", "max", 0.10), ("noisyor / vadi 0.10", "noisyor", 0.10),
+            ("noisyor / vadi 0.25", "noisyor", 0.25))
+VIS_MAIN = "noisyor / vadi 0.10"
+VIS_CATS = ("<100 ms", "100-200 ms", ">=200 ms", "tekrarsiz")
+
+
+def report_visibility(r):
+    if not sum(r["vis_tot"].values()):
+        return
+    print()
+    print("  F) Tepe gorunurlugu (Katman 3.11 Adim 0): gercek notanin +-1 karesinde onset egrisinde ayri tepe")
+    print(f"    {'grup':<12}{'n':>7}  " + "  ".join(f"{k:>20}" for k, _, _ in VIS_KEYS)
+          + f"  {'kacan':>7}  {'kacanlardan gorunur':>20}")
+    for c in VIS_CATS:
+        n_ = r["vis_tot"][c]
+        if not n_:
+            continue
+        print(f"    {c:<12}{n_:>7}  " + "  ".join(f"{pct(r['vis'][k][c], n_):>20}" for k, _, _ in VIS_KEYS)
+              + f"  {pct(r['vis_miss'][c], n_):>7}  {pct(r['vis_miss_vis'][c], r['vis_miss'][c]):>20}")
+    print(f"    'kacanlardan gorunur' = model tepeyi vermis ama cozumleme notayi kaybetmis ({VIS_MAIN}) "
+          "-> cozumleme tavani")
+    print("    karar (<100 ms, gaps_val): gorunurluk >= %60 -> cozumleme yeter | <= %30 -> egitim (Adim 4) de gerekli")
 
 
 def report(r):
@@ -307,7 +361,7 @@ def report_repeats(r):
               f"                     {f(rg, lambda a: a < x)} / {f(ro, lambda a: a < x)}")
 
 
-def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note"):
+def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_search=True, limit=None):
     device = get_device()
     model, ck, kind = load_model("crnn", device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -318,15 +372,17 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note"):
     for split in splits:
         sel = selection_split(split, "auto")
         if sel not in cache:
-            cache[sel] = load_split(sel, model, ck, kind, device)
-        f1, thr, ot, dec = calibrate(cache[sel], on_grid, DEC_GRID if dec_search else None, criterion)
-        data = cache[sel] if sel == split else load_split(split, model, ck, kind, device)
+            cache[sel] = load_split(sel, model, ck, kind, device, limit)
+        f1, thr, ot, dec = calibrate(cache[sel], on_grid, DEC_GRID if dec_search else None, criterion,
+                                     peak_search)
+        data = cache[sel] if sel == split else load_split(split, model, ck, kind, device, limit)
         print(f"\n{'=' * 78}\n{split}  ({len(data)} kayit) | esikler '{sel}' uzerinde: perde {thr}, "
               f"cozumleme {'kare-esik' if ot is None else f'onset@{ot}'}"
               + (f" {dec}" if ot is not None else "") + f"\n{'=' * 78}")
         res = analyse(data, thr, ot, dec)
         report(res)
         report_repeats(res)
+        report_visibility(res)
 
 
 if __name__ == "__main__":
@@ -337,5 +393,8 @@ if __name__ == "__main__":
     ap.add_argument("--no-dec-search", action="store_true", help="Katman 3.9 cozumlemesi (Adim 0 olcumu)")
     ap.add_argument("--criterion", default="note", choices=["note", "mix"],
                     help="esik secim olcutu: note = nota F1 (3.9); mix = (nota F1 + kare F1)/2")
+    ap.add_argument("--no-peak-search", action="store_true",
+                    help="Katman 3.11 aramasini yapma: 3.10 cozumlemesiyle olc (Adim 0 tavan olcumu)")
+    ap.add_argument("--limit", type=int, default=None, help="split basina en fazla kayit (duman testi)")
     a = ap.parse_args()
-    main(a.ckpt, a.splits, a.onset_thr, not a.no_dec_search, a.criterion)
+    main(a.ckpt, a.splits, a.onset_thr, not a.no_dec_search, a.criterion, not a.no_peak_search, a.limit)

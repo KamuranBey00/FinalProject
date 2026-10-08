@@ -27,21 +27,31 @@ from gtab.config import FRAME_RATE
 
 
 # ---------------------------------------------------------------- perde matrisi
-def pitch_matrix(probs: np.ndarray, instrument: Instrument = STANDARD_6):
+def _combine_positions(cols, combine):
+    """Bir perdeyi üretebilen (tel, fret) olasılıkları -> perde olasılığı."""
+    if not cols:
+        return None
+    if combine == "noisyor":                 # Katman 3.11: eğitimdeki noisy-OR ile aynı
+        return (1.0 - np.prod([1.0 - c for c in cols], axis=0)).astype(np.float32)
+    return np.max(cols, axis=0)
+
+
+def pitch_matrix(probs: np.ndarray, instrument: Instrument = STANDARD_6, combine: str = "max"):
     """
     probs: (T, S, ncls) softmax. -> (pitch_mat (T, P), pitch_lo)
     Her perde için: o perdeyi üretebilen TÜM (tel, fret) pozisyonları arasından
     EN YÜKSEK olasılık. Teli marjinalize eder; geriye güçlü perde sinyali kalır.
+    combine='noisyor' (Katman 3.11): 1 - Π(1 - p) — GAPS eğitimindeki pitch_probs ile uyumlu.
     """
     T, S, ncls = probs.shape
     lo, hi = instrument.pitch_range()
     P = hi - lo + 1
     out = np.zeros((T, P), dtype=np.float32)
     for p in range(P):
-        pitch = lo + p
-        for (s, f) in instrument.pitch_to_positions(pitch):
-            if f + 1 < ncls:
-                np.maximum(out[:, p], probs[:, s, f + 1], out=out[:, p])
+        cols = [probs[:, s, f + 1] for (s, f) in instrument.pitch_to_positions(lo + p) if f + 1 < ncls]
+        v = _combine_positions(cols, combine)
+        if v is not None:
+            out[:, p] = v
     return out, lo
 
 
@@ -211,26 +221,56 @@ def transcription_to_frames(tr: Transcription, n_frames: int,
 
 
 # ---------------------------------------------------------------- Katman 3.9: onset
-def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6):
+def pitch_onset_matrix(probs, onsets, instrument: Instrument = STANDARD_6, combine: str = "max"):
     """
     probs (T,S,ncls), onsets (T,S) tel onset olasılığı -> (T,P) perde-onset matrisi.
     Her perde için: o perdeyi çalabilen (tel, fret) pozisyonlarında
     max(onset_tel · P(tel, fret)) -- pitch_matrix ile aynı marjinalizasyon.
+    combine='noisyor' (Katman 3.11): losses.pitch_onset_probs ile sayısal olarak aynı.
     """
     T, S, ncls = probs.shape
     lo, hi = instrument.pitch_range()
     out = np.zeros((T, hi - lo + 1), dtype=np.float32)
     for p in range(hi - lo + 1):
-        for (s, f) in instrument.pitch_to_positions(lo + p):
-            if f + 1 < ncls:
-                np.maximum(out[:, p], onsets[:, s] * probs[:, s, f + 1], out=out[:, p])
+        cols = [onsets[:, s] * probs[:, s, f + 1] for (s, f) in instrument.pitch_to_positions(lo + p)
+                if f + 1 < ncls]
+        v = _combine_positions(cols, combine)
+        if v is not None:
+            out[:, p] = v
     return out
+
+
+def pick_peaks(x, threshold, min_dist=2, prominence=0.1):
+    """
+    Katman 3.11 — 1B onset eğrisi -> yerel tepe kareleri (nota başlangıç adayları).
+    Aday: x > threshold ve yerel maksimum (düzlükte ilk kare). Ardışık iki tepe ancak
+    en az 'min_dist' kare aralıklı VE aralarındaki vadi alçak tepeden en az 'prominence'
+    aşağıdaysa ayrı vuruş sayılır; değilse yüksek olan tutulur.
+    Koşu tabanlı başlangıçtan farkı: vadi eşiğin altına inmese de yakın vuruşlar ayrılır.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    if not len(x):
+        return []
+    l = np.concatenate([[-np.inf], x[:-1]]); r = np.concatenate([x[1:], [-np.inf]])
+    cand = np.nonzero((x > threshold) & (x > l) & (x >= r))[0]
+    kept = []
+    for c in cand:
+        if not kept:
+            kept.append(int(c)); continue
+        k = kept[-1]
+        valley = float(x[k:c + 1].min())
+        if c - k >= min_dist and min(x[k], x[c]) - valley >= prominence:
+            kept.append(int(c))
+        elif x[c] > x[k]:
+            kept[-1] = int(c)
+    return kept
 
 
 def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_threshold=0.5,
                         min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
                         peak=False, reattack=0.0, rise=None, rise_keep=0.0, rise_split=0.0,
-                        offset_mat=None, offset_threshold=0.0):
+                        offset_mat=None, offset_threshold=0.0,
+                        peak_pick=False, min_dist=2, prominence=0.1):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -260,6 +300,11 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                          -> önceki notaya gömülen hızlı tekrarlar (Adım 3 revizyonu).
       - offset_mat (T,P) + offset_threshold > 0 (Adım 3c): nota, offset olasılığı eşiği aştığı
                          karede biter (perde hâlâ aktif olsa bile) -> kuyruk/sonraki vuruş ayrımı.
+      - peak_pick=True (Katman 3.11): başlangıçlar koşunun kenarından değil, onset eğrisinin
+                         yerel tepelerinden (pick_peaks: min_dist, prominence) -> eşiğin altına
+                         inmeyen vadiyle ayrılan hızlı tekrarlar iki nota olur. 'peak' yok sayılır;
+                         yeniden vuruş / enerji kabul süzgeçleri tepe değeriyle aynen uygulanır;
+                         rise_split'in sabit 3 kare koşulu min_dist olur.
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -273,7 +318,12 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
         st = list(np.nonzero(starts[:, p])[0])
         use_rise = rise is not None and (rise_keep > 0 or rise_split > 0)
         rmax = (lambda t: float(rise[max(0, t - 1):t + 3, p].max())) if use_rise else None
-        if (peak or reattack > 0 or (use_rise and rise_keep > 0)) and st:
+        keep_r = rise_keep if use_rise else 0.0
+        pkv = None
+        if peak_pick:                             # Katman 3.11: yerel tepe başlangıçları
+            st = pick_peaks(onset_mat[:, p], onset_threshold, min_dist, prominence)
+            pkv = {s_: float(onset_mat[s_, p]) for s_ in st}
+        elif (peak or reattack > 0 or keep_r > 0) and st:
             adj, pkv = [], {}
             for s_ in st:
                 e_ = s_
@@ -282,12 +332,11 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                 k_ = s_ + int(np.argmax(onset_mat[s_:e_, p])) if peak else s_
                 adj.append(k_); pkv[k_] = float(onset_mat[s_:e_, p].max())
             st = adj
-            keep_r = rise_keep if use_rise else 0.0
-            if reattack > 0 or keep_r > 0:        # nota sürerken zayıf yeniden vuruşu yok say
-                st = [s_ for i_, s_ in enumerate(st)
-                      if i_ == 0 or s_ == 0 or not cont[s_ - 1, p]
-                      or (reattack > 0 and pkv[s_] >= reattack)
-                      or (keep_r > 0 and rmax(s_) >= keep_r)]
+        if pkv is not None and (reattack > 0 or keep_r > 0):   # nota sürerken zayıf yeniden vuruşu yok say
+            st = [s_ for i_, s_ in enumerate(st)
+                  if i_ == 0 or s_ == 0 or not cont[s_ - 1, p]
+                  or (reattack > 0 and pkv[s_] >= reattack)
+                  or (keep_r > 0 and rmax(s_) >= keep_r)]
         if refractory > 0 and len(st) > 1:
             kept = [st[0]]
             for s_ in st[1:]:
@@ -303,7 +352,8 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                               & (r >= np.concatenate([[0], r[:-1]]))
                               & (r >= np.concatenate([r[1:], [0]])))[0]
             have = np.array(st, int)
-            extra = [int(t) for t in cand if not len(have) or np.abs(have - t).min() > 3]
+            sep = min_dist if peak_pick else 3
+            extra = [int(t) for t in cand if not len(have) or np.abs(have - t).min() > sep]
             if extra:
                 st = sorted(st + extra)
         covered = np.zeros(T, bool) if fallback > 0 else None
@@ -367,12 +417,14 @@ def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
     onsets None ise eski kare-eşik segmentasyonu (Katman 3.6), değilse onset tabanlı (3.9).
     dec: segment_notes_onset'in Katman 3.10 parametreleri (off_ratio, refractory, fallback).
     """
-    pm, lo = pitch_matrix(probs, instrument)
+    dec = dict(dec)
+    combine = dec.pop("combine", "max")           # Katman 3.11: 'max' | 'noisyor'
+    pm, lo = pitch_matrix(probs, instrument, combine)
     if onsets is None or onset_threshold is None:
         return segment_notes(pm, lo, threshold, min_frames=min_frames)
-    om = pitch_onset_matrix(probs, onsets, instrument)
+    om = pitch_onset_matrix(probs, onsets, instrument, combine)
     if offsets is not None and dec.get("offset_threshold", 0) > 0:     # Adım 3c: offset kafası
-        dec = dict(dec, offset_mat=pitch_onset_matrix(probs, offsets, instrument))
+        dec = dict(dec, offset_mat=pitch_onset_matrix(probs, offsets, instrument, combine))
     else:
         dec = {k: v for k, v in dec.items() if k != "offset_threshold"}
     return segment_notes_onset(pm, om, lo, threshold, onset_threshold, min_frames=min_frames,

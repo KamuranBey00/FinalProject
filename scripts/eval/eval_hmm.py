@@ -300,14 +300,20 @@ if __name__ == "__main__":
     ap.add_argument("--rise-split", type=float, default=0.0, help="Adim 3 rev.: gomulu tekrari enerji kanitiyla ayirma esigi (dB)")
     ap.add_argument("--fallback", type=int, default=0, help="Katman 3.10 onset'siz yedek nota (kare)")
     ap.add_argument("--offset-thr", type=float, default=0.0, help="Adim 3c: offset kafasi esigi (0 = kapali)")
+    ap.add_argument("--combine", default="max", choices=["max", "noisyor"], help="Katman 3.11: perde birlestirme")
+    ap.add_argument("--peak-pick", action="store_true", help="Katman 3.11: yerel tepe baslangiclari")
+    ap.add_argument("--prominence", type=float, default=0.1, help="Katman 3.11: vadi derinligi")
+    ap.add_argument("--min-dist", type=int, default=2, help="Katman 3.11: tepeler arasi en az kare")
     args = ap.parse_args()
     if args.demo:
         dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
                    rise_keep=args.rise_keep, rise_split=args.rise_split,
-                   offset_threshold=args.offset_thr)
+                   offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
+                   prominence=args.prominence, min_dist=args.min_dist)
         demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
         dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
                    rise_keep=args.rise_keep, rise_split=args.rise_split,
-                   offset_threshold=args.offset_thr)
+                   offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
+                   prominence=args.prominence, min_dist=args.min_dist)
         main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)

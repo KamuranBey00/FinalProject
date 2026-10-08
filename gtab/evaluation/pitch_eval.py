@@ -155,6 +155,9 @@ RISE_GRID = [dict(rise_keep=k, rise_split=sp, refractory=r)
              if (k, sp, r) != (0.0, 0.0, None)]
 # Adım 3c: offset kafası varsa nota bitişi için offset eşiği (0 = kapalı)
 OFFSET_GRID = (0.3, 0.5, 0.7)
+# Katman 3.11: yerel tepe başlangıçları (pick_peaks) — vadi derinliği x en az aralık (kare)
+PEAK_GRID = [dict(peak_pick=True, prominence=pr, min_dist=md)
+             for pr in (0.05, 0.1, 0.15, 0.25) for md in (1, 2, 3)]
 
 
 def score(r, criterion="note"):
@@ -162,7 +165,46 @@ def score(r, criterion="note"):
     return r["note"][2] if criterion == "note" else 0.5 * (r["note"][2] + r["frame"][2])
 
 
-def calibrate(data, on_grid, dec_grid=None, criterion="note"):
+def _try(best_on, data, dec, criterion, thresholds=None, onset_thr=None):
+    """Tek aday: (skor, eşik, onset eşiği, dec) — mevcut en iyiden iyiyse onu döndürür."""
+    _, t0, o0, _ = best_on
+    o = o0 if onset_thr is None else onset_thr
+    sel = evaluate_split(data, thresholds=thresholds or [t0], onset_thr=o, dec=dec)
+    t = max(sel, key=lambda t: score(sel[t], criterion))
+    return (score(sel[t], criterion), t, o, dec) if score(sel[t], criterion) > best_on[0] else best_on
+
+
+def calibrate_peaks(data, best_on, criterion="note"):
+    """
+    Katman 3.11 Adım 1 — 3.10 seçiminin üstüne (yalnızca doğrulama verisinde):
+      a) perde birleştirme: max | noisyor (eğitimle uyumlu)
+      b) yerel tepe başlangıçları: PEAK_GRID x refrakter {seçili, 0}
+      c) yakın tekrarı kesen kapıları gevşetme: yeniden vuruş 0, enerji kabul 0
+      d) onset eşiği {0.05, 0.1, 0.2, 0.3} ve perde eşiği ±0.1 yeniden
+    Her aday ancak doğrulama skorunu artırırsa alınır -> 3.10 seçimi her zaman aday.
+    """
+    d0 = best_on[3]
+    best_on = _try(best_on, data, dict(d0, combine="noisyor"), criterion)
+    d0 = best_on[3]
+    for g in PEAK_GRID:
+        best_on = _try(best_on, data, dict(d0, **g), criterion)
+        if d0.get("refractory", 0):
+            best_on = _try(best_on, data, dict(d0, **g, refractory=0), criterion)
+    d0 = best_on[3]
+    if d0.get("peak_pick"):
+        for k in ("reattack", "rise_keep"):
+            if d0.get(k, 0):
+                best_on = _try(best_on, data, dict(best_on[3], **{k: 0.0}), criterion)
+        for o in (0.05, 0.1, 0.2, 0.3):
+            if o != best_on[2]:
+                best_on = _try(best_on, data, best_on[3], criterion, onset_thr=o)
+        t0 = best_on[1]
+        near = sorted({round(min(0.9, max(0.3, t0 + d)), 1) for d in (-0.1, 0.0, 0.1)})
+        best_on = _try(best_on, data, best_on[3], criterion, thresholds=near)
+    return best_on
+
+
+def calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True):
     """
     Doğrulama verisinde seçim (test setine hiç bakılmaz):
       1) çözümleme yöntemi (kare-eşik / onset@eşik) + perde eşiği
@@ -223,6 +265,8 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note"):
                 sel = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)
                 if score(sel[t0], criterion) > best_on[0]:
                     best_on = (score(sel[t0], criterion), t0, o0, dec)
+        if peak_search:                            # Katman 3.11 Adım 1
+            best_on = calibrate_peaks(data, best_on, criterion)
         if best_on[0] > best[0]:
             best = best_on
     return best

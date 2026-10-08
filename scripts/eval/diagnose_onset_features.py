@@ -19,9 +19,15 @@ Adaylar (hepsi hop 512 -> kare ızgarası ve tüm çözümleme kuralları aynı 
   cqt_fs05   : CQT filter_scale=0.5 (pencere yarı)
   stft1024   : STFT n_fft=1024 (~46 ms), harmonikler 1..4
   stft2048   : STFT n_fft=2048 (~93 ms), harmonikler 1..4
+Katman 3.11 Adım 2 (önbellekteki CQT'den; yeni önbellek gerekmez):
+  cqt_decay  : sönüm telafili yükseliş: E(t) - [E(t-1) + (E(t-1) - E(t-3)) / 2]  (beklenen sönüme göre sapma)
+  hf_flux    : ~2 kHz üstü CQT binlerinde (pencere ~10 ms) pozitif akı ortalaması; perdeye özgü değil
+               (tırnak/parmak temasının geniş bant izi), tüm perdelere aynı değer
+  decay+hf   : cqt_decay + hf_flux (basit birleşim)
 
 Çalıştırma:
     python -m scripts.eval.diagnose_onset_features --splits gaps_val val_comp --limit 12
+    python -m scripts.eval.diagnose_onset_features --splits gaps_val val_comp --fast   # yalnız önbellek özellikleri
 """
 
 import argparse
@@ -61,6 +67,15 @@ def split_tracks(split, limit=None):
     return [(f, wav(f)) for f in files]
 
 
+def _npz_only(split, limit=None):
+    """--fast: ses yolu gerekmez (mirdata / GAPS ses dosyası okunmaz)."""
+    import glob
+    files = gaps_files("gaps_train")[1] if split == "gaps_val" else \
+        sorted(glob.glob(os.path.join(split_dir(split), "*.npz")))
+    files = files[:limit] if limit else files
+    return [(f, None) for f in files]
+
+
 # ----------------------------------------------------------------- özellikler
 def rise(E, k):
     prev = np.full_like(E, np.inf)
@@ -95,19 +110,46 @@ def stft_energy(y, n_fft, harmonics=(1, 2, 3, 4)):
     return E
 
 
-def features(npz_cqt, wav):
+HF_BIN = int(round(CQT_BINS_PER_OCTAVE * np.log2(2000.0 / CQT_FMIN_HZ)))   # ~2 kHz
+
+
+def decay_rise(E):
+    """Katman 3.11: beklenen doğrusal (dB) sönüme göre pozitif sapma."""
+    pred = np.full_like(E, np.inf)
+    pred[3:] = E[2:-1] + (E[2:-1] - E[:-3]) / 2.0
+    return np.maximum(E - np.where(np.isinf(pred), E, pred), 0.0)
+
+
+def hf_flux(c):
+    """Katman 3.11: ~2 kHz üstü binlerde kare-kare pozitif dB farkının ortalaması -> (T, P)."""
+    hf = np.asarray(c, np.float32)[:, HF_BIN:]
+    d = np.zeros(len(hf), np.float32); d[1:] = np.maximum(hf[1:] - hf[:-1], 0).mean(1)
+    return np.repeat(d[:, None], HI - LO + 1, axis=1)
+
+
+def features(npz_cqt, wav, fast=False):
+    c = np.asarray(npz_cqt, np.float32)
+    E_cqt = cqt_energy(c)
+    dec, hf = decay_rise(E_cqt), hf_flux(c)
+    out = {
+        "cqt": energy_rise(npz_cqt, INSTR),
+        "cqt_k1": rise(E_cqt, 1),
+        "cqt_decay": dec,
+        "hf_flux": hf,
+        "decay+hf": dec + hf,
+    }
+    if fast:
+        return out
     y, _ = librosa.load(wav, sr=SAMPLE_RATE, mono=True)
     c05 = librosa.amplitude_to_db(np.abs(librosa.cqt(
         y, sr=SAMPLE_RATE, hop_length=HOP_LENGTH, fmin=CQT_FMIN_HZ, bins_per_octave=CQT_BINS_PER_OCTAVE,
         n_bins=CQT_N_BINS, filter_scale=0.5)), ref=np.max).T
-    E_cqt = cqt_energy(np.asarray(npz_cqt, np.float32))
-    return {
-        "cqt": energy_rise(npz_cqt, INSTR),
-        "cqt_k1": rise(E_cqt, 1),
+    out.update({
         "cqt_fs05": rise(cqt_energy(c05), 3),
         "stft1024": rise(stft_energy(y, 1024), 3),
         "stft2048": rise(stft_energy(y, 2048), 3),
-    }
+    })
+    return out
 
 
 # ----------------------------------------------------------------- kitleler
@@ -148,13 +190,13 @@ def auc(pos, neg):
     return (r[:len(pos)].sum() - len(pos) * (len(pos) + 1) / 2) / (len(pos) * len(neg))
 
 
-def main(splits, limit):
+def main(splits, limit, fast=False):
     for split in splits:
-        tracks = split_tracks(split, limit)
+        tracks = split_tracks(split, limit) if not fast else [(f, None) for f, _ in _npz_only(split, limit)]
         pos = {}; neg = {}; meta = []
         for k, (f, wav) in enumerate(tracks, 1):
             d = np.load(f)
-            feats = features(d["cqt"], wav)
+            feats = features(d["cqt"], wav, fast)
             reps, sus = populations(d["frame"], d["onset"])
             T = min(len(d["frame"]), *(len(v) for v in feats.values()))
             reps = [r for r in reps if r[0] < T]; sus = [s for s in sus if s[0] < T]
@@ -182,5 +224,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--splits", nargs="+", default=["gaps_val", "val_comp"])
     ap.add_argument("--limit", type=int, default=None, help="split basina en fazla bu kadar kayit")
+    ap.add_argument("--fast", action="store_true", help="yalniz onbellek (CQT) ozellikleri; ses okunmaz")
     a = ap.parse_args()
-    main(a.splits, a.limit)
+    main(a.splits, a.limit, a.fast)

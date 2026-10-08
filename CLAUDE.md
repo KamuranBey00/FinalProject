@@ -56,6 +56,17 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
 - Katman 3.10'da yapılanlar: çözümleme kuralları (histerezis, refrakter, yedek, tepe, yeniden vuruş),
   CQT enerji yükselişi kuralları (`energy_rise`, `rise_keep/split`), keskin onset + kısa nota ağırlığı,
   hızlı tekrar onset ağırlığı, offset kafası; tanılama `diagnose_pitch` (A–E), `diagnose_onset_features`.
+- **Katman 3.11 sürüyor** (`docs/devlog/README12.md`; plan kullanıcıdan geldi): hızlı tekrarlar —
+  yerel tepe çözümlemesi + noisy-OR + perde-onset. **Kaldığımız yer (8 Ekim):** Adım 0 (diagnose_pitch
+  bölüm F, tepe görünürlüğü), Adım 1 (`pick_peaks`, `combine`, `calibrate_peaks`; `--no-peak-search` = 3.10)
+  ve Adım 2 ölçüm satırları (`cqt_decay`, `hf_flux`) kodlandı + regresyon HEAD ile birebir; **kullanıcının
+  ölçümü bekleniyor** (komutlar README12 §8a). Adım 3 (val_comp seçim parçası) kullanıcı kararı;
+  Adım 4 eğitim yalnız <100 ms görünürlük < %60 ise. 3.10 kapanışı: kullanıcı README12'yi 3.11 olarak açtı.
+  **Ölçüldü (8 Ekim):** Adım 0 <100 ms görünürlük %66.6 → çözümleme dalı (eğitim yok). Adım 2 özellikleri
+  GAPS'te CQT'nin altında → alınmadı. Adım 1: GAPS nota 0.689 → **0.736** (precision) ama tekrar kaçma
+  kötüleşti (yeniden_vuruş 0 + refrakter 6 + enerji 6 kapıları yerel tepe adaylarını eliyor). GS tab F1 0.760
+  (nötr) → Adım 1 GAPS için kabul. **Sırada: Adım 1b** (vadi kanıtlı kapılar + ortak arama + tekrar odaklı
+  aday seçimi; README12 §8b) — kullanıcı onayı bekleniyor.
 - Tel tarafı (gerekirse): A teli 0.66; adaylar 36 bin/oktav önbellek, hex öğretmen
   damıtması, SynthTab naylon + GAPS partisyon TAB etiketleri (`.match`).
 - **Denenmiş, işe yaramayan (tekrarlama):** el yapımı Viterbi hareket maliyeti;

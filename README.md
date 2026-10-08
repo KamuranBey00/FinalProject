@@ -192,6 +192,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README9.md](docs/devlog/README9.md) — Katman 3.8 (klasik gitar: GAPS + SynthTab yol haritası)
 - [docs/devlog/README10.md](docs/devlog/README10.md) — Katman 3.9 (tel/perde sesini öğrenmek: hata analizi, onset, harmonik istifleme)
 - [docs/devlog/README11.md](docs/devlog/README11.md) — Katman 3.10 (polifonide perde: hayalet notalar ve kaçan perdeler)
+- [docs/devlog/README12.md](docs/devlog/README12.md) — Katman 3.11 (hızlı tekrarlar: yerel tepe çözümlemesi, noisy-OR, perde-onset)
 
 ## Yol haritası
 
@@ -208,6 +209,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [ ] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
       (bkz. [docs/devlog/README11.md](docs/devlog/README11.md)) — fingerstyle (GAPS) ölçütü sağlandı,
       tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik, kapanış kararı bekleniyor
+- [ ] Katman 3.11 — Hızlı tekrarlar (tremolo): yerel tepe çözümlemesi + noisy-OR, gerekirse vadi
+      eğitimi ve perde-onset kafası (bkz. [docs/devlog/README12.md](docs/devlog/README12.md))
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

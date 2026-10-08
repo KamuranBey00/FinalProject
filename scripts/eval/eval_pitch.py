@@ -35,7 +35,7 @@ from gtab.utils import get_device
 
 # ----------------------------------------------------------------- ana akış
 def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_search=True, criterion="note",
-         force_rise=None):
+         force_rise=None, peak_search=True):
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -53,14 +53,16 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
     def get_cal(sp):
         if sp not in cal:
             cal[sp] = calibrate(load_split(sp, model, ck, kind, device, limit), on_grid,
-                                DEC_GRID if dec_search else None, criterion)
+                                DEC_GRID if dec_search else None, criterion, peak_search)
             f1, t, o, dec = cal[sp]
             print(f"  [{sp}] secim: perde esigi={t}, cozumleme="
                   f"{'kare-esik' if o is None else f'onset@{o}'}"
                   + (f", histerezis={dec['off_ratio']}, refrakter={dec['refractory']}, yedek={dec['fallback']}"
                      f", tepe={dec.get('peak', False)}, yeniden_vurus={dec.get('reattack', 0.0)}"
                      f", enerji_kabul={dec.get('rise_keep', 0.0)}, enerji_bol={dec.get('rise_split', 0.0)}"
-                     f", offset={dec.get('offset_threshold', 0.0)}"
+                     f", offset={dec.get('offset_threshold', 0.0)}, birlestirme={dec.get('combine', 'max')}"
+                     f", yerel_tepe={dec.get('peak_pick', False)}"
+                     + (f" (vadi={dec['prominence']}, ara={dec['min_dist']})" if dec.get('peak_pick') else "")
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
         return cal[sp]
 
@@ -115,6 +117,8 @@ if __name__ == "__main__":
                     help="ablasyon: enerji kurallarini tum splitlerde bu degerlere sabitle (or. 4 6)")
     ap.add_argument("--criterion", default="note", choices=["note", "mix"],
                     help="esik secim olcutu: note = nota F1 (3.9); mix = (nota F1 + kare F1)/2")
+    ap.add_argument("--no-peak-search", action="store_true",
+                    help="Katman 3.11 aramasini (noisy-OR, yerel tepe) yapma; 3.10 secimi birebir")
     a = ap.parse_args()
     main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr, not a.no_dec_search, a.criterion,
-         a.force_rise)
+         a.force_rise, not a.no_peak_search)
