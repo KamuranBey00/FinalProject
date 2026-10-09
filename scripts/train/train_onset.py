@@ -31,20 +31,29 @@ giriş katmanı h=1 kanalına taşınır, diğer kanallar 0 -> başlangıçta in
     # Katman 3.10 Adim 3c: hizli tekrar onset agirligi + GAPS perde agirligi (tabcrnn_poly'den)
     python -m scripts.train.train_onset --init tabcrnn_poly.pt --epochs 15 --ckpt tabcrnn_rep.pt \
         --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0 --repeat-weight 3 --pitch-weight 2
+    # Katman 3.11 Adim 4: vadi hedefi + fragman negatifleri + hizli tekrar ornekleme (tabcrnn_rep_off'tan)
+    python -m scripts.train.train_onset --init tabcrnn_rep_off.pt --epochs 15 --ckpt tabcrnn_rep_valley.pt \
+        --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0 --repeat-weight 3 --pitch-weight 2 \
+        --offset-weight 1 --valley-weight 5 --frag-weight 3 --oversample 3
 """
 
 import argparse
 
+import numpy as np
+
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from gtab.core.instrument import STANDARD_6
 from gtab.data.gaps import gaps_files
-from gtab.data.tab_labels import n_tab_classes
+from gtab.data.tab_labels import n_tab_classes, fragment_frames
+from gtab.decoding.viterbi import pitch_onset_matrix
 from gtab.data.torch_dataset import GuitarSetSeq, PitchSeq
 from gtab.evaluation.metrics import prf, PAD
 from gtab.models.losses import pitch_index, pitch_probs, pitch_onset_probs, tab_pitch_target, \
+    tab_pitch_onset_target, tab_pitch_weight, \
     string_offset_target, pitch_offset_target
+from gtab.models.inference import load_model, predict_heads
 from gtab.models.nets import TabCRNNOnset, DEFAULT_HARMONICS, warm_start_state
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import set_seed, get_device
@@ -72,12 +81,18 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
     üstünde en iyisi alınır (seçilen eşik de raporlanır -> çözümlemede kullanılır).
     """
     model.eval()
+    has_pon = getattr(model, "pitch_onset_head", None) is not None
     t = dict(tab=[0, 0, 0], gf=[0, 0, 0])
-    t.update({("on", h): [0, 0, 0] for h in ONSET_THRS})
-    t.update({("go", h): [0, 0, 0] for h in ONSET_THRS})
+    t.update({(k, h): [0, 0, 0] for k in ("on", "go", "pon", "gpo") for h in ONSET_THRS})
     with torch.no_grad():
         for x, y, on, _, _, L in gs_val:
-            tab, ol = model.forward_both(x.to(device))
+            tab, ol, _, pl = model.forward_full(x.to(device))
+            if has_pon:                                # Katman 3.12: perde-onset kafası (GuitarSet)
+                valid_ = (y[:, :, 0] != PAD)
+                pt_ = tab_pitch_onset_target(y, on, idx.cpu())[valid_] > 0.5
+                pp_ = torch.sigmoid(pl).cpu()[valid_]
+                for h in ONSET_THRS:
+                    _acc(t, ("pon", h), pp_ > h, pt_)
             pred = tab.argmax(-1).cpu(); po = torch.sigmoid(ol).cpu()
             valid = y[:, :, 0] != PAD
             p, g = pred[valid], y[valid]
@@ -89,15 +104,21 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
                 _acc(t, ("on", h), po > h, go)
         if gp_val is not None:
             for x, f, on, _, L in gp_val:
-                tab, ol = model.forward_both(x.to(device))
+                tab, ol, _, pl = model.forward_full(x.to(device))
                 pf = pitch_probs(tab, idx).cpu() > thr
                 pon = pitch_onset_probs(tab, ol, idx).cpu()
                 mask = torch.arange(f.shape[1])[None, :] < L[:, None]
                 _acc(t, "gf", pf[mask], f[mask] > 0.5)
                 for h in ONSET_THRS:
                     _acc(t, ("go", h), pon[mask] > h, on[mask] > 0.5)
+                if has_pon:                            # Katman 3.12: perde-onset kafası (GAPS)
+                    pp_ = torch.sigmoid(pl).cpu()[mask]
+                    for h in ONSET_THRS:
+                        _acc(t, ("gpo", h), pp_ > h, on[mask] > 0.5)
     out, best_thr = {"tab": _f(*t["tab"])}, {}
     keys = ("on", "gf", "go") if gp_val is not None else ("on",)
+    if has_pon:
+        keys += ("pon", "gpo") if gp_val is not None else ("pon",)
     for k in keys:
         if k == "gf":
             out[k] = _f(*t[k]); continue
@@ -106,11 +127,34 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
     return out, best_thr
 
 
+# ----------------------------------------------------------------- Katman 3.11 Adım 4
+def fragment_fns(init, device):
+    """init modelin eğitim verisinde sahte bölünme ürettiği yerler (bir kez, eğitim başında)."""
+    m, _, _ = load_model("crnn", device, init)
+    def gs(path, cqt, tab, hard):                 # tel düzeyi: tel onset eğrisi
+        _, ons, _ = predict_heads(m, np.asarray(cqt, np.float32), device)
+        return fragment_frames(ons, tab, hard)
+    def gaps(path, cqt, fr, on):                  # perde düzeyi: noisy-OR perde-onset eğrisi
+        probs, ons, _ = predict_heads(m, np.asarray(cqt, np.float32), device)
+        return fragment_frames(pitch_onset_matrix(probs, ons, INSTR, "noisyor"), fr, on)
+    return gs, gaps
+
+
+def make_loader(ds, batch_size, oversample):
+    """oversample > 1: hızlı tekrar içeren parçalar bu kat daha sık örneklenir (epoch boyu aynı)."""
+    if oversample <= 1:
+        return DataLoader(ds, batch_size=batch_size, shuffle=True)
+    w = [oversample if f else 1.0 for f in ds.fast]
+    print(f"  ornekleme: {sum(ds.fast)}/{len(ds)} parca hizli tekrar iceriyor (x{oversample})")
+    return DataLoader(ds, batch_size=batch_size, sampler=WeightedRandomSampler(w, len(ds), replacement=True))
+
+
 # ----------------------------------------------------------------- eğitim
 def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           onset_weight=1.0, pitch_weight=1.0, ckpt="tabcrnn_onset.pt", seed=1, pos_weight=3.0,
           harmonics=None, onset_soft=None, gs_pitch_weight=0.0, short_frames=0, short_weight=1.0,
-          repeat_weight=1.0, repeat_gap=3, offset_weight=0.0):
+          repeat_weight=1.0, repeat_gap=3, offset_weight=0.0, valley_weight=1.0, frag_weight=1.0, oversample=1.0, deep=0,
+          pitch_onset_weight=0.0, new_lr_mult=1.0):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
@@ -124,10 +168,17 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           f"{gs_pitch_weight} | kisa nota: <{short_frames} kare x{short_weight}")
     print(f"Katman 3.10 Adim 3c: tekrar onset agirligi x{repeat_weight} (onceki nota <= {repeat_gap} kare once)"
           f" | GAPS perde agirligi {pitch_weight} | offset kafasi agirligi {offset_weight}")
+    print(f"Katman 3.11 Adim 4: vadi agirligi x{valley_weight} | fragman agirligi x{frag_weight} | "
+          f"hizli tekrar parcasi ornekleme x{oversample}")
+    gs_frag = gaps_frag = None
+    if frag_weight != 1.0:
+        print(f"  fragman taramasi: {init} egitim verisinde (bir kez)")
+        gs_frag, gaps_frag = fragment_fns(init, device)
     tab_ds = GuitarSetSeq(CACHE_DIR, tab_splits, CHUNK, onsets=True, onset_soft=onset_soft,
                           short_frames=short_frames, short_weight=short_weight,
-                          repeat_weight=repeat_weight, repeat_gap=repeat_gap)
-    tab_dl = DataLoader(tab_ds, batch_size=batch_size, shuffle=True)
+                          repeat_weight=repeat_weight, repeat_gap=repeat_gap,
+                          valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gs_frag)
+    tab_dl = make_loader(tab_ds, batch_size, oversample)
     gs_val = DataLoader(GuitarSetSeq(CACHE_DIR, "val", CHUNK, onsets=True, onset_soft=onset_soft),
                         batch_size=batch_size)
     p_tr = gp_val = None
@@ -135,18 +186,25 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         tr_f, va_f = [], []
         for sp in pitch_splits:
             a, b = gaps_files(sp); tr_f += a; va_f += b
-        p_tr = DataLoader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft,
-                                   repeat_weight=repeat_weight, repeat_gap=repeat_gap),
-                          batch_size=batch_size, shuffle=True)
+        p_tr = make_loader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft,
+                                    repeat_weight=repeat_weight, repeat_gap=repeat_gap,
+                                    valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gaps_frag),
+                           batch_size, oversample)
         gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft), batch_size=batch_size)
         print(f"perde: {len(tr_f)} train / {len(va_f)} val kaydi (icraciya gore ayrik)")
 
     use_off = offset_weight > 0 or bool(init_ck and init_ck.get("offset"))
-    model = TabCRNNOnset(INSTR.num_strings, ncls, harmonics=harmonics, offset=use_off).to(device)
-    print(f"model: TabCRNNOnset | harmonikler: {harmonics or 'yok (tek kanal CQT)'}")
+    deep = max(deep, int(init_ck.get("deep") or 0) if init_ck else 0)
+    use_pon = pitch_onset_weight > 0 or bool(init_ck and init_ck.get("pitch_onset"))
+    model = TabCRNNOnset(INSTR.num_strings, ncls, harmonics=harmonics, offset=use_off,
+                         deep=deep, pitch_onset=use_pon).to(device)
+    print(f"model: TabCRNNOnset | harmonikler: {harmonics or 'yok (tek kanal CQT)'} | "
+          f"Katman 3.12: artik blok {deep} | perde-onset kafasi {use_pon} (kayip x{pitch_onset_weight}) | "
+          f"yeni katman lr x{new_lr_mult}")
+    missing = []
     if init:
         missing = warm_start_state(init_ck["model"], model)
-        assert all(k.startswith(("onset_head", "offset_head")) for k in missing), missing
+        assert all(k.startswith(("onset_head", "offset_head", "res.", "pitch_onset_head")) for k in missing), missing
         print(f"baslangic: {init}" + (f" (sifirdan: {sorted({k.split('.')[0] for k in missing})})" if missing else "")
               + (" | giris katmani harmoniklere genisletildi (h=1 = eski agirlik)"
                  if harmonics and not init_ck.get("harmonics") else ""))
@@ -156,13 +214,18 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     bce = torch.nn.BCELoss(reduction="none")
     # seyrek onset pozitiflerini dengele (karelerin ~%5'i)
     bce_logit = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=torch.tensor(pos_weight, device=device))
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    # Katman 3.12: init'te olmayan (sıfırdan) katmanlar ayrı grupta, lr x new_lr_mult
+    new_p = [p for n_, p in model.named_parameters() if n_ in set(missing)]
+    old_p = [p for n_, p in model.named_parameters() if n_ not in set(missing)]
+    opt = torch.optim.Adam([{"params": old_p, "lr": lr}] +
+                           ([{"params": new_p, "lr": lr * new_lr_mult}] if new_p else []))
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
     state = {}
 
     def save():
         torch.save({"model": model.state_dict(), "n_classes": ncls, "onset": True, "offset": use_off,
+                    "deep": deep, "pitch_onset": use_pon,
                     "onset_thr": state.get("thr"), "harmonics": list(harmonics) if harmonics else None,
                     "onset_soft": onset_soft}, ckpt)
 
@@ -171,9 +234,14 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         state["cur_thr"] = bt.get("go", bt.get("on"))
         print(f"ep {ep:2d} | " + " ".join(f"{k} {v:.3f}" for k, v in logs.items()) + " | " +
               " ".join(f"{n} {m[k]:.3f}" + (f"@{bt[k]}" if k in bt else "")
-                       for k, n in (("tab", "GS-tabF1"), ("on", "GS-onsetF1"),
-                                    ("gf", "GAPS-kareF1"), ("go", "GAPS-onsetF1")) if k in m))
-        return sum(m.values()) / len(m)
+                       for k, n in (("tab", "GS-tabF1"), ("on", "GS-onsetF1"), ("pon", "GS-perdeOnsetF1(kafa)"),
+                                    ("gf", "GAPS-kareF1"), ("go", "GAPS-onsetF1(tel)"),
+                                    ("gpo", "GAPS-onsetF1(kafa)")) if k in m))
+        # seçim skoru: eski 4 ölçü; GAPS onset'te iki yoldan iyisi (kafa yoksa eskisiyle birebir)
+        sel = {k: m[k] for k in ("tab", "on", "gf", "go") if k in m}
+        if "gpo" in m:
+            sel["go"] = max(m["go"], m["gpo"])
+        return sum(sel.values()) / len(sel)
 
     best = score(0, {}); state["thr"] = state["cur_thr"]; save()
     for ep in range(1, epochs + 1):
@@ -182,7 +250,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         p_iter = iter(p_tr) if p_tr is not None else None
         for x, y, on, wt, ow, _ in tab_dl:
             x, y, on, wt, ow = x.to(device), y.to(device), on.to(device), wt.to(device), ow.to(device)
-            tab, ol, offl = model.forward_all(x)
+            tab, ol, offl, pl = model.forward_full(x)
             B, L, S, C = tab.shape
             # tel CE: sınıf ağırlığı x kısa nota ağırlığı (wt=1 -> eski ağırlıklı ortalama, birebir)
             yv = y.reshape(-1); cw = w[yv.clamp(min=0)] * (yv != PAD)
@@ -197,6 +265,12 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                 l_off = (bce_logit(offl, ot_) * vm).sum() / (vm.sum() * S).clamp(min=1)
                 loss = loss + offset_weight * l_off
                 sums["off"] += l_off.item()
+            if pitch_onset_weight > 0:                 # Katman 3.12: perde-onset kafası (GuitarSet)
+                pot_ = tab_pitch_onset_target(y, on, idx)
+                wp_ = tab_pitch_weight(y, ow, idx)
+                l_pon = (bce_logit(pl, pot_) * valid * wp_).sum() / (valid.sum() * pot_.shape[-1])
+                loss = loss + pitch_onset_weight * l_pon
+                sums["pon"] = sums.get("pon", 0.0) + l_pon.item()
             if gs_pitch_weight > 0:                    # GuitarSet'e doğrudan perde kaybı
                 pt = tab_pitch_target(y, idx)
                 pp_gs = pitch_probs(tab, idx).clamp(1e-6, 1 - 1e-6)
@@ -210,7 +284,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                 except StopIteration:
                     p_iter = iter(p_tr); xg, fg, og, owg, Lg = next(p_iter)
                 xg, fg, og, owg = xg.to(device), fg.to(device), og.to(device), owg.to(device)
-                tg, olg, offg = model.forward_all(xg)
+                tg, olg, offg, plg = model.forward_full(xg)
                 mask = (torch.arange(fg.shape[1], device=device)[None, :] < Lg.to(device)[:, None]).float()
                 pp = pitch_probs(tg, idx).clamp(1e-6, 1 - 1e-6)
                 po = pitch_onset_probs(tg, olg, idx).clamp(1e-6, 1 - 1e-6)
@@ -218,6 +292,10 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                 l_po = ((bce(po, og) * owg).mean(-1) * mask).sum() / mask.sum()
                 loss = loss + pitch_weight * (l_p + onset_weight * l_po)
                 sums["perde"] += l_p.item(); sums["ponset"] += l_po.item()
+                if pitch_onset_weight > 0:             # Katman 3.12: perde-onset kafası (GAPS, doğrudan)
+                    l_gpon = ((bce_logit(plg, og) * owg).mean(-1) * mask).sum() / mask.sum()
+                    loss = loss + pitch_weight * pitch_onset_weight * l_gpon
+                    sums["gpon"] = sums.get("gpon", 0.0) + l_gpon.item()
                 if offset_weight > 0:                  # Adım 3c: perde offset'i (noisy-OR)
                     pot, pom = pitch_offset_target(fg, og, onset_soft)
                     pof = pitch_onset_probs(tg, offg, idx).clamp(1e-6, 1 - 1e-6)
@@ -256,6 +334,14 @@ if __name__ == "__main__":
     ap.add_argument("--repeat-weight", type=float, default=1.0, help="hizli ayni perde tekrar onset'lerinin kayip agirligi")
     ap.add_argument("--repeat-gap", type=int, default=3, help="onceki nota bu kadar kare icinde bittiyse tekrar sayilir")
     ap.add_argument("--offset-weight", type=float, default=0.0, help="offset kafasi kayip agirligi (0 = kafa yok)")
+    # Katman 3.11 Adim 4 (varsayilan 1 = onceki egitim, birebir)
+    ap.add_argument("--valley-weight", type=float, default=1.0, help="hizli tekrar vadisine 'vurus yok' agirligi")
+    ap.add_argument("--frag-weight", type=float, default=1.0, help="init modelin sahte bolunme yerlerine 'vurus yok' agirligi")
+    ap.add_argument("--oversample", type=float, default=1.0, help="hizli tekrar iceren parcalari bu kat sik ornekle")
+    # Katman 3.12 Adim 3a (varsayilan = onceki egitim, birebir)
+    ap.add_argument("--deep", type=int, default=0, help="CNN govdesine sifirla baslatilan artik blok sayisi")
+    ap.add_argument("--pitch-onset-weight", type=float, default=0.0, help="dogrudan perde-onset kafasi kayip agirligi (0 = yok)")
+    ap.add_argument("--new-lr-mult", type=float, default=1.0, help="init'te olmayan yeni katmanlarin lr carpani")
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
@@ -264,4 +350,6 @@ if __name__ == "__main__":
                      else tuple(float(h) if "." in h else int(h) for h in a.harmonics.split(",")) if a.harmonics else None),
           onset_soft=a.onset_soft, gs_pitch_weight=a.gs_pitch_weight,
           short_frames=a.short_frames, short_weight=a.short_weight,
-          repeat_weight=a.repeat_weight, repeat_gap=a.repeat_gap, offset_weight=a.offset_weight)
+          repeat_weight=a.repeat_weight, repeat_gap=a.repeat_gap, offset_weight=a.offset_weight,
+          valley_weight=a.valley_weight, frag_weight=a.frag_weight, oversample=a.oversample,
+          deep=a.deep, pitch_onset_weight=a.pitch_onset_weight, new_lr_mult=a.new_lr_mult)

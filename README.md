@@ -196,6 +196,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README10.md](docs/devlog/README10.md) — Katman 3.9 (tel/perde sesini öğrenmek: hata analizi, onset, harmonik istifleme)
 - [docs/devlog/README11.md](docs/devlog/README11.md) — Katman 3.10 (polifonide perde: hayalet notalar ve kaçan perdeler)
 - [docs/devlog/README12.md](docs/devlog/README12.md) — Katman 3.11 (hızlı tekrarlar: yerel tepe çözümlemesi, noisy-OR, perde-onset)
+- [docs/devlog/README13.md](docs/devlog/README13.md) — Katman 3.12 (akustik katman: kapasite mi veri mi; derin CNN / SynthTab ön-eğitimi)
 
 ## Yol haritası
 
@@ -212,10 +213,12 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [ ] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
       (bkz. [docs/devlog/README11.md](docs/devlog/README11.md)) — fingerstyle (GAPS) ölçütü sağlandı,
       tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik, kapanış kararı bekleniyor
-- [ ] Katman 3.11 — Hızlı tekrarlar (tremolo): yerel tepe çözümlemesi + noisy-OR, gerekirse vadi
-      eğitimi ve perde-onset kafası (bkz. [docs/devlog/README12.md](docs/devlog/README12.md)) — çözümleme
-      (yerel tepe + noisy-OR + tekrar kapıları) GAPS nota F1 0.689 → 0.733, akor tekrar kaçma <100 ms
-      %72 → %23, tab F1 0.760; GAPS hızlı tekrarları için sırada vadi eğitimi (Adım 4)
+- [x] Katman 3.11 — Hızlı tekrarlar (tremolo): yerel tepe çözümlemesi + noisy-OR + vadi eğitimi
+      (bkz. [docs/devlog/README12.md](docs/devlog/README12.md)) — `tabcrnn_rep_valley.pt`, tab F1 0.769 / 0.771,
+      akor tekrar kaçma <100 ms %72 → %23; GAPS <100 ms tekrarları açık kaldı
+- [x] Katman 3.12 — Akustik katman: kapasite ölçümü → derin CNN (artık bloklar) + perde-onset kafası
+      (bkz. [docs/devlog/README13.md](docs/devlog/README13.md)) — **`tabcrnn_deep2.pt`**: GAPS nota F1
+      0.720 → **0.779**, tab F1 **0.777**, val_comp 0.807; kapasite farkı 0.004 → SynthTab (3b) gerekmedi
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

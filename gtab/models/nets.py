@@ -87,6 +87,22 @@ class TabCNN(nn.Module):
         return z.view(-1, self.num_strings, self.n_classes)
 
 
+class ResBlock(nn.Module):
+    """
+    Katman 3.12 Adım 3a — 2D artık blok (zaman ve frekans boyunca 3x3, kanal sayısı sabit).
+    Son BatchNorm'un ağırlığı (gamma) 0 ile başlar -> blok başlangıçta 0 ekler (x + 0 = x):
+    derinleştirilmiş model eğitim başında eski modelle BİREBİR aynı çıktıyı verir.
+    """
+    def __init__(self, ch):
+        super().__init__()
+        self.body = nn.Sequential(nn.Conv2d(ch, ch, 3, padding=1), nn.BatchNorm2d(ch), nn.ReLU(),
+                                  nn.Conv2d(ch, ch, 3, padding=1), nn.BatchNorm2d(ch))
+        nn.init.zeros_(self.body[4].weight)
+
+    def forward(self, x):
+        return x + self.body(x)
+
+
 class TabCRNN(nn.Module):
     """
     Katman 3.5 — CNN gövdesi + BiLSTM zamansal kafa.
@@ -97,7 +113,7 @@ class TabCRNN(nn.Module):
     daha stabil nota sınırları (Katman 4 teknik atfı için şart).
     """
     def __init__(self, num_strings=6, n_classes=26, n_bins=192,
-                 lstm_hidden=128, lstm_layers=2, harmonics=None):
+                 lstm_hidden=128, lstm_layers=2, harmonics=None, deep=0):
         super().__init__()
         self.num_strings = num_strings
         self.n_classes = n_classes
@@ -110,6 +126,8 @@ class TabCRNN(nn.Module):
             nn.MaxPool2d((1, 4)),               # SADECE frekans havuzla; zaman (L) korunur
             nn.Dropout(0.25),
         )
+        # Katman 3.12 Adım 3a: CNN gövdesinden sonra 'deep' artık blok (0 = yok -> eski model birebir)
+        self.res = nn.Sequential(*[ResBlock(64) for _ in range(deep)]) if deep else None
         feat = 64 * (n_bins // 4)
         self.proj = nn.Linear(feat, 256)
         self.lstm = nn.LSTM(256, lstm_hidden, num_layers=lstm_layers,
@@ -121,6 +139,8 @@ class TabCRNN(nn.Module):
         if self.hstack is not None:
             x = self.hstack(x)                   # (B, H, L, n_bins)
         z = self.cnn(x)                          # (B, 64, L, n_bins/4)
+        if self.res is not None:
+            z = self.res(z)
         B, C, L, F = z.shape
         z = z.permute(0, 2, 1, 3).reshape(B, L, C * F)   # (B, L, feat)
         z = torch.relu(self.proj(z))             # (B, L, 256)
@@ -142,14 +162,18 @@ class TabCRNNOnset(TabCRNN):
     forward() yalnızca tab logit'i döndürür -> tüm eski değerlendirme kodu çalışır.
     """
     def __init__(self, num_strings=6, n_classes=26, n_bins=192, lstm_hidden=128, lstm_layers=2,
-                 harmonics=None, offset=False):
-        super().__init__(num_strings, n_classes, n_bins, lstm_hidden, lstm_layers, harmonics)
+                 harmonics=None, offset=False, deep=0, pitch_onset=False, n_pitches=49):
+        super().__init__(num_strings, n_classes, n_bins, lstm_hidden, lstm_layers, harmonics, deep)
         self.onset_head = nn.Linear(lstm_hidden * 2, num_strings)
         # Katman 3.10 Adım 3c: OFFSET kafası ("bu karede bu teldeki nota bitiyor"); offset=False
         # iken modül yok -> eski checkpoint'ler birebir yüklenir.
         self.offset_head = nn.Linear(lstm_hidden * 2, num_strings) if offset else None
         if offset:
             nn.init.constant_(self.offset_head.bias, -2.94)
+        # Katman 3.12 Adım 3a: DOĞRUDAN perde-onset kafası (49 perde; tel x fret noisy-OR'una gerek yok)
+        self.pitch_onset_head = nn.Linear(lstm_hidden * 2, n_pitches) if pitch_onset else None
+        if pitch_onset:
+            nn.init.constant_(self.pitch_onset_head.bias, -2.94)
         # Seyrek hedef (karelerin ~%5'i onset): bias'ı bu önsel orana göre başlat
         # (logit(0.05) ≈ -2.94). Sıfır bias ile kafa her yerde ~0.5 tahminle başlıyor
         # ve tek başına bu önseli öğrenmek epoch'lar sürüyordu (duman testi).
@@ -168,6 +192,15 @@ class TabCRNNOnset(TabCRNN):
         tab = self.head(z).view(B, L, self.num_strings, self.n_classes)
         off = self.offset_head(z) if self.offset_head is not None else None
         return tab, self.onset_head(z), off
+
+    def forward_full(self, x):
+        """Katman 3.12: -> tab, tel onset, tel offset | None, perde-onset logit (B,L,P) | None"""
+        z = self.encode(x)
+        B, L, _ = z.shape
+        tab = self.head(z).view(B, L, self.num_strings, self.n_classes)
+        off = self.offset_head(z) if self.offset_head is not None else None
+        pon = self.pitch_onset_head(z) if self.pitch_onset_head is not None else None
+        return tab, self.onset_head(z), off, pon
 
 
 def warm_start_state(state, model):

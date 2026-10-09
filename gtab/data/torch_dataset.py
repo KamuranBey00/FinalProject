@@ -124,8 +124,11 @@ class GuitarSetSeq(Dataset):
 
     def __init__(self, cache_dir, split, chunk=200, augment=False, num_frets=24,
                  bins_per_semitone=2, onsets=False, onset_soft=None, short_frames=0, short_weight=1.0,
-                 repeat_weight=1.0, repeat_gap=3):
+                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None):
         """
+        Katman 3.11 Adım 4: valley_weight (hızlı tekrar vadisi "vuruş yok", hedef 0), frag_weight +
+        frag_fn(path, cqt, tab, keskin_onset) -> (T,S) bool (modelin sahte bölünme yerleri); self.fast =
+        parça hızlı tekrar içeriyor mu (örnekleme). Varsayılanlar = eski eğitim, birebir.
         split: tek split ("train") ya da liste (["train", "train_comp"]) -- Katman 3.7.
         augment: True ise her chunk'a rastgele CQT-uzayı çoğaltma (sadece EĞİTİMDE).
         onsets: True ise tel başına onset hedefi de verilir (Katman 3.9) ->
@@ -136,6 +139,7 @@ class GuitarSetSeq(Dataset):
         self.onsets = []
         self.weights = []                  # Katman 3.10: kısa nota ağırlığı (onsets=True iken)
         self.on_weights = []               # Katman 3.10 Adım 3c: onset kaybı ağırlığı (kısa x tekrar)
+        self.fast = []                     # Katman 3.11 Adım 4: parça hızlı tekrar içeriyor mu
         self.augment = augment
         self.num_frets = num_frets
         self.bps = bins_per_semitone
@@ -153,7 +157,8 @@ class GuitarSetSeq(Dataset):
                 raise KeyError(f"{path} icinde 'tab' yok. build_tab_labels.py calisti mi?")
             cqt = _normalize(d["cqt"]); tab = d["tab"].astype(np.int64)
             if onsets:
-                from gtab.data.tab_labels import string_onsets, short_note_weights, repeat_onset_weights
+                from gtab.data.tab_labels import (string_onsets, short_note_weights, repeat_onset_weights,
+                                                  valley_frames)
                 roll = d["onset"] if "onset" in d else None
                 on_all = string_onsets(tab, roll, soft=onset_soft)
                 w_all = (short_note_weights(tab, string_onsets(tab, roll, dilate=1) > 0,
@@ -162,6 +167,14 @@ class GuitarSetSeq(Dataset):
                 ow_all = w_all * (repeat_onset_weights(tab, string_onsets(tab, roll, dilate=1),
                                                        repeat_gap, repeat_weight)
                                   if repeat_weight != 1.0 else 1.0)
+                hard = string_onsets(tab, roll, dilate=1)
+                valley, fast_on = valley_frames(tab, hard, repeat_gap)
+                if valley_weight != 1.0:              # Adım 4: vadi = "vuruş yok" (soft komşu değeri de silinir)
+                    on_all = on_all * ~valley
+                    ow_all = np.where(valley, np.maximum(ow_all, valley_weight), ow_all)
+                if frag_fn is not None and frag_weight != 1.0:
+                    fm = frag_fn(path, cqt, tab, hard)
+                    ow_all = np.where(fm, np.maximum(ow_all, frag_weight), ow_all)
             T, n_bins = cqt.shape
             for start in range(0, T, chunk):
                 c = cqt[start:start + chunk]; tb = tab[start:start + chunk]
@@ -181,6 +194,7 @@ class GuitarSetSeq(Dataset):
                     ow = np.ones((chunk, tab.shape[1]), np.float16)
                     ow[:L] = ow_all[start:start + chunk]
                     self.on_weights.append(ow)
+                    self.fast.append(bool(fast_on[start:start + chunk].any()))
 
     def __len__(self): return len(self.items)
 
@@ -254,14 +268,17 @@ class PitchSeq(Dataset):
     """
 
     def __init__(self, files, chunk=200, onsets=False, dilate=2, onset_soft=None,
-                 repeat_weight=1.0, repeat_gap=3):
+                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None):
         """onsets: True ise perde onset roll'u ve onset kaybı ağırlığı da verilir ->
-        (x, frame, onset (L,P), onset ağırlığı (L,P), L). repeat_weight: Adım 3c tekrar ağırlığı."""
-        from gtab.data.tab_labels import repeat_onset_weights
+        (x, frame, onset (L,P), onset ağırlığı (L,P), L). repeat_weight: Adım 3c tekrar ağırlığı.
+        valley_weight / frag_weight / frag_fn(path, cqt, frame, onset) / self.fast: Katman 3.11 Adım 4
+        (GuitarSetSeq ile aynı)."""
+        from gtab.data.tab_labels import repeat_onset_weights, valley_frames
         self.items = []
         self.with_onsets = onsets
         self.onsets = []
         self.on_weights = []
+        self.fast = []
         for path in files:
             with np.load(path) as d:
                 cqt = _normalize(d["cqt"]).astype(np.float16)
@@ -269,6 +286,15 @@ class PitchSeq(Dataset):
                 on_all = d["onset"].astype(np.uint8) if onsets else None
             ow_all = (repeat_onset_weights(fr, on_all, repeat_gap, repeat_weight)
                       if onsets and repeat_weight != 1.0 else None)
+            if onsets:
+                valley, fast_on = valley_frames(fr, on_all, repeat_gap)
+                if valley_weight != 1.0 or (frag_fn is not None and frag_weight != 1.0):
+                    ow_all = np.ones(fr.shape, np.float32) if ow_all is None else ow_all
+                if valley_weight != 1.0:
+                    ow_all = np.where(valley, np.maximum(ow_all, valley_weight), ow_all)
+                if frag_fn is not None and frag_weight != 1.0:
+                    fm = frag_fn(path, cqt, fr, on_all)
+                    ow_all = np.where(fm, np.maximum(ow_all, frag_weight), ow_all)
             if onsets and onset_soft is not None:     # Katman 3.10: keskin hedef (tepe 1, sonraki kare soft)
                 o1 = on_all.astype(np.float32); nx = np.zeros_like(o1); nx[1:] = o1[:-1] * float(onset_soft)
                 on_all = np.maximum(o1, nx) * fr
@@ -277,6 +303,8 @@ class PitchSeq(Dataset):
                 for k in range(1, dilate):
                     on_all[k:] |= base[:-k]
                 on_all &= fr
+            if onsets and valley_weight != 1.0:       # Adım 4: vadi = "vuruş yok"
+                on_all = on_all * ~valley
             T, nb = cqt.shape
             for s in range(0, T, chunk):
                 c, f = cqt[s:s + chunk], fr[s:s + chunk]
@@ -292,6 +320,7 @@ class PitchSeq(Dataset):
                     if ow_all is not None:
                         ow[:L] = ow_all[s:s + chunk]
                     self.on_weights.append(ow)
+                    self.fast.append(bool(fast_on[s:s + chunk].any()))
 
     def __len__(self):
         return len(self.items)

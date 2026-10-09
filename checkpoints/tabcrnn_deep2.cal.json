@@ -1,0 +1,38 @@
+{
+  "gaps_val": [
+    0.7340775908226869,
+    0.4,
+    0.4,
+    {
+      "off_ratio": 0.5,
+      "refractory": 3,
+      "fallback": 10,
+      "reattack": 0.5,
+      "rise_keep": 6.0,
+      "rise_split": 8.0,
+      "combine": "noisyor",
+      "onset_source": "pitch"
+    }
+  ],
+  "val": [
+    0.9016249360569405,
+    0.7,
+    0.2,
+    {
+      "off_ratio": 1.0,
+      "refractory": 0,
+      "fallback": 10,
+      "peak": true,
+      "reattack": 0.3,
+      "rise_keep": 0.0,
+      "rise_split": 8.0,
+      "offset_threshold": 0.7,
+      "combine": "noisyor",
+      "peak_pick": true,
+      "prominence": 0.25,
+      "min_dist": 2,
+      "re_valley": 0.0,
+      "onset_source": "pitch"
+    }
+  ]
+}

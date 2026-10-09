@@ -446,6 +446,94 @@ GAPS seçimi Adım 1 ile fiilen aynı).
 sahte bölünmeden ayıran bir onset vadisi vermemesi. Adım 4.1 (iki yakın aynı perde onset'i arasına "onset yok"
 hedefi + fragman yerlerinde negatif) tam bunu öğretir.
 
+## 8e. Adım 4 — vadi hedefli eğitim (9 Ekim 2026, kodlandı)
+
+Gerekçe (§8d): çözümleme gerçek tekrarı sahte bölünmeden ayıramıyor; ikisinin onset vadisi aynı görünüyor.
+Model ikisini ancak ikisini de görürse ayırmayı öğrenir → iki negatif türü + örnekleme (kullanıcı planı):
+
+| Bileşen | Ne yapar | Kod |
+|---|---|---|
+| **Vadi hedefi** `--valley-weight` | hızlı aynı perde tekrarında (önceki nota ≤ 3 kare önce bitti, iki onset arası ≤ 8 kare ~186 ms) iki onset ARASINDAKİ karelere "vuruş yok" (hedef 0, soft komşu değeri de silinir) × ağırlık | `tab_labels.valley_frames` |
+| **Fragman negatifleri** `--frag-weight` | init modelin (`tabcrnn_rep_off`) eğitim verisinde etiket notası sürerken tepe verdiği ama etikette **±2 karede vuruş olmayan** yerlere (tepe ±1 kare) "vuruş yok" × ağırlık; eğitim başında bir kez taranır, önbellek yazılmaz | `tab_labels.fragment_frames`, `train_onset.fragment_fns` |
+| **Örnekleme** `--oversample` | hızlı tekrar içeren 200 karelik parçalar bu kat sık örneklenir (`WeightedRandomSampler`, epoch boyu aynı) | `train_onset.make_loader`, `ds.fast` |
+
+GuitarSet'te tel düzeyinde (tel onset eğrisi), GAPS'te perde düzeyinde (noisy-OR perde-onset eğrisi) uygulanır.
+Varsayılanlar (1) = önceki eğitim, birebir.
+
+Testler:
+- Birim: vadi yalnız hızlı aynı perde tekrarının iki onset'i arasında (IOI 12 kare ve farklı perde hariç) ✓;
+  fragman yalnız nota içindeki, etiket onset'ine > 2 kare uzak tepede (onset'e yakın tepe ve sessizlik hariç) ✓.
+- **Varsayılan = HEAD (0b9fc20):** GuitarSetSeq (val_comp) ve PitchSeq (gaps_val 3 kayıt) onset hedefleri,
+  onset ağırlıkları, kısa nota ağırlıkları birebir ✓.
+- Vadi karelerinde hedef 0 ✓ (val_comp 2323 vadi karesi). Fragman oranı: train_comp[:20] aktif tel karelerinin
+  %6.0'ı (~1500 tepe / 6098 onset), gaps_train[:5] aktif perde karelerinin %5.3'ü (~1080 tepe / 3072 onset).
+  Hızlı tekrar içeren parça: val %15, gaps_test %8.
+- 1 epoch duman eğitimi (küçük veri, tüm seçenekler açık) uçtan uca ✓.
+
+**Risk:** GAPS'te fragman tepeleri onset sayısının ~%35'i; partisyonda eksik kalmış gerçek tekrarlar da negatif
+olabilir (±2 kare toleransı yalnız zamanlama kaymasını kapsar). Precision düşer ve recall artarsa (ya da GAPS
+tekrarları kötüleşirse) ilk ayar `--frag-weight` düşürmek.
+
+### Çalıştırma (Adım 4)
+```bash
+python -m scripts.train.train_onset --init tabcrnn_rep_off.pt --epochs 15 --ckpt tabcrnn_rep_valley.pt --onset-soft 0.3 --gs-pitch-weight 1.0 --short-frames 5 --short-weight 2.0 --repeat-weight 3 --pitch-weight 2 --offset-weight 1 --valley-weight 5 --frag-weight 3 --oversample 3
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_rep_valley.pt --splits gaps_test val val_comp --criterion mix
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_rep_valley.pt --splits gaps_val val_comp --criterion mix
+# tab F1: [val] secim satırındaki değerlerle
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_rep_valley.pt --onset-thr <..> --off-ratio <..> --refractory <..> --fallback <..> [--peak] --reattack <..> --rise-keep <..> --rise-split <..> --offset-thr <..> --combine <..> --peak-pick --prominence <..> --min-dist <..> --re-valley <..>
+```
+
+Karar (§5 Adım 4, taban = rep_off + 1b çözümlemesi):
+- Kabul: GAPS <100 ms kaçma **−10 puan** (gaps_val 72.6 → ≤ 62.6; gaps_test 76.2 → ≤ 66.2) **ve** GAPS nota F1
+  **+0.01** (0.733 → ≥ 0.743); GS solo tab F1 ≥ 0.750.
+- Ardından Katman 3.11 kapanışı ve **Katman 4'e geçiş** (kullanıcı kararı, 9 Ekim): Adım 4 sonucuyla katman çıkış
+  ölçütleri (§5) raporlanır; sağlanmayanlar açık madde olarak yazılır. Adım 5 (perde-onset kafası) yalnız gerekirse,
+  Katman 4'ten sonra.
+
+## 8f. Adım 4 — sonuçlar (9 Ekim 2026, `tabcrnn_rep_valley.pt`)
+
+Eğitim: 15 epoch; hızlı tekrar içeren parça GuitarSet 934/2110, GAPS 1542/8785 (×3 örneklendi). Seçim skoru
+0.564 (init) → 0.588; GS tab F1 0.692 → 0.704, GAPS kare F1 0.612 → 0.633, GAPS onset F1 0.325 → 0.375
+(eğitim içi ölçüler).
+
+Seçim: gaps_val → **koşu tabanlı** (yerel tepe seçilmedi), onset@0.1, eşik 0.4, refrakter 6, yeniden_vuruş 0.3,
+enerji 6/8, noisy-OR. val → yerel tepe (0.05 / 3), onset@0.05, eşik 0.8, refrakter 0, yeniden_vuruş 0.3,
+enerji_böl 8, offset 0.7, noisy-OR.
+
+| | rep_off + 1b | **rep_valley** | fark |
+|---|---|---|---|
+| gaps_test nota / kare F1 | 0.733 / 0.676 (P 0.725 R 0.742) | 0.720 / 0.684 (P 0.666 R 0.784) | −0.013 / +0.008 |
+| gaps_test tekrar kaçma <100 / 100–200 | 76.2 / 43.8 | 77.7 / **36.8** | +1.5 / **−7.0** |
+| gaps_val tekrar kaçma <100 / 100–200 / ≥200 | 72.6 / 62.9 / 30.1 | 73.0 / **52.7** / **24.2** | 0 / **−10** / −6 |
+| gaps_val kaçan / hayalet | 29.7% / 25.0% | **25.9%** / 30.3% | recall ↑, precision ↓ |
+| GS val nota / kare | 0.908 / 0.874 | **0.916 / 0.880** | +0.008 / +0.006 |
+| val_comp nota / kare | 0.766 / 0.822 | **0.783** / 0.818 | +0.017 / −0.004 |
+| GS solo tab F1 (greedy / Viterbi) | 0.760 / 0.760 | **0.769 / 0.771** | **+0.009 / +0.011** |
+| oracle tel doğruluğu | 0.862 | 0.869 | +0.007 |
+| tepe görünürlüğü <100 ms (gaps_val, noisy-OR) | 66.5% | 65.1% | değişmedi |
+
+Yorum:
+- **100–200 ms tekrarlar düzeldi** (gaps_val −10, gaps_test −7 puan), ≥200 ms de (−6). Vadi + örnekleme bu
+  bandda çalıştı.
+- **<100 ms tekrarlar hiç değişmedi** — ne çözümlemede ne eğitimde; tepe görünürlüğü de aynı (%65). Bu bant
+  (≤ 4 kare) için model ayrı tepe üretmeyi öğrenmedi. Aday nedenler: GAPS partisyon etiketlerinin zamanlaması
+  (eksik / kayık tekrarlar) ve 23 ms kare ile tel düzeyindeki dolaylı onset öğrenimi. Kalan aday: Adım 5
+  (doğrudan perde-onset kafası) — Katman 4'ten sonra, gerekirse.
+- GAPS'te recall arttı, precision düştü (fragman negatiflerine rağmen hayalet arttı); nota F1 −0.013 (gürültü
+  sınırının biraz dışında), kare F1 +0.008; mix ölçütü ≈ aynı (0.7045 → 0.702).
+- **Proje ana ölçütü tab F1 en iyi değerinde (0.771)**; val_comp nota F1 ilk kez hedefi (0.780) geçti.
+
+Kabul (§5 Adım 4): <100 ms −10 puan ✗; GAPS nota +0.01 ✗ (−0.013); GS tab F1 ≥ 0.750 ✓ → **kabul kuralı
+sağlanmadı.**
+
+Katman 3.11 çıkış ölçütleri (§5): GAPS <100 ms ≤ %40 ✗ (77.7) | 100–200 ms ≤ %35 ✗ (36.8, yakın) |
+GAPS nota ≥ 0.709 ✓ (0.720) | val_comp ≥ 0.780 / 0.830 → nota ✓ 0.783, kare ✗ 0.818 | GS tab F1 ≥ 0.750 ✓ (0.771).
+
+**Öneri:** Katman 3.11 bu durumla kapanır (kullanıcı kararı: sonuçtan sonra Katman 4). Katman 4'e taşınacak taban
+için öneri `tabcrnn_rep_valley.pt` (tab F1, GS nota/kare, val_comp nota, 100–200 ms tekrarlar daha iyi; GAPS nota
+−0.013 tek kayıp). Alternatif: GAPS nota F1 öncelikliyse `tabcrnn_rep_off.pt` + 1b. İki checkpoint de korunuyor.
+Açık maddeler Katman 4'e devreder: <100 ms aynı perde tekrarları; val_comp kare F1 (0.818 / 0.830).
+
 ## 8. Durum
 - [x] Kod okuma teşhisi (1a, 1b)
 - [x] Sentetik duman testi (3 seed): çözümleme tavanı doğrulandı, yerel tepe + noisy-OR <100 ms yakalamayı ~2.4×, 100–200 ms'yi ~3× artırdı
@@ -457,7 +545,9 @@ hedefi + fragman yerlerinde negatif) tam bunu öğretir.
 - [x] Adım 1b — vadi kanıtı + ortak arama + tekrar odaklı seçim: kod + testler + regresyon
 - [x] Adım 1b — ölçüm: GAPS tekrarları değişmedi (vadi kanıtı precision'ı çökertiyor), akor tekrarları büyük düşüş
 - [x] Adım 1b — GS tab F1 0.760 (nötr) → 1b seçimi kabul
-- [ ] Adım 4 — eğitim (vadi hedefi) ← **KALDIĞIMIZ YER: kullanıcı onayı**
+- [x] Adım 4 — vadi hedefi + fragman negatifleri + örnekleme: kod + testler (§8e)
+- [x] Adım 4 — eğitim + ölçüm: tab F1 0.771 (en iyi), 100–200 ms tekrarlar −10 puan, <100 ms değişmedi, GAPS nota −0.013 → kabul kuralı sağlanmadı (§8f)
+- [x] Katman 3.11 kapanışı: kullanıcı Katman 3.12'ye (akustik katman, README13) geçti; taban `tabcrnn_rep_valley.pt`
 - [x] Adım 2 — `cqt_decay`, `hf_flux` ölçüm satırları: kod
 - [x] Adım 2 — AUC ölçümü: GAPS'te mevcut CQT'nin altında → çözümlemeye alınmadı
 - [ ] Adım 3 — strum gruplama; seçim parçası kararı (kullanıcı)

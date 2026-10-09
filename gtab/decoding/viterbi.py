@@ -418,7 +418,8 @@ def energy_rise(cqt_db, instrument: Instrument = STANDARD_6, k: int = 3,
 
 
 def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
-            instrument: Instrument = STANDARD_6, min_frames: int = 2, rise=None, offsets=None, **dec):
+            instrument: Instrument = STANDARD_6, min_frames: int = 2, rise=None, offsets=None,
+            pitch_onsets=None, **dec):
     """
     Tek giriş noktası: model çıktısı -> [(start, end, pitch)].
     onsets None ise eski kare-eşik segmentasyonu (Katman 3.6), değilse onset tabanlı (3.9).
@@ -426,10 +427,12 @@ def segment(probs, onsets=None, threshold=0.5, onset_threshold=0.5,
     """
     dec = dict(dec)
     combine = dec.pop("combine", "max")           # Katman 3.11: 'max' | 'noisyor'
+    dec.pop("onset_source", None)                 # Katman 3.12: kaynak seçimi çağıranda (pitch_onsets verilir/verilmez)
     pm, lo = pitch_matrix(probs, instrument, combine)
     if onsets is None or onset_threshold is None:
         return segment_notes(pm, lo, threshold, min_frames=min_frames)
-    om = pitch_onset_matrix(probs, onsets, instrument, combine)
+    # Katman 3.12: perde-onset kafası verildiyse nota bulma doğrudan ondan (tel x fret marjinalizasyonu yok)
+    om = pitch_onsets if pitch_onsets is not None else pitch_onset_matrix(probs, onsets, instrument, combine)
     if offsets is not None and dec.get("offset_threshold", 0) > 0:     # Adım 3c: offset kafası
         dec = dict(dec, offset_mat=pitch_onset_matrix(probs, offsets, instrument, combine))
     else:

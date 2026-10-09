@@ -39,11 +39,16 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
 - `data/` git'e girmez. Kaynaklar README'lerde; önbellek `scripts/data/*` ile üretilir.
 - Disk ~73 GB boş: SynthTab'den yalnızca sınırlı naylon (`luthier_*`) alt küme.
 
-## Güncel durum (7 Ekim 2026 itibarıyla)
+## Güncel durum (10 Ekim 2026 itibarıyla)
 - **Kullanıcı hedefi: solo fingerstyle** (klasik gitar; tek ve çok ses; hızlı/yavaş art arda notaların
   ayrılması; ileride ritim). Ana polifoni ölçütü GAPS; GuitarSet akorları "kabul edilebilir" sayıldı.
   Kalıcı çözüm istiyor (sürekli küçük sürümler değil).
-- **Güncel taban: `checkpoints/tabcrnn_rep_off.pt`** (TabCRNNOnset + harmonik istifleme + offset kafası;
+- **GÜNCEL TABAN (10 Ekim): `checkpoints/tabcrnn_deep2.pt`** + `tabcrnn_deep2.cal.json` (Katman 3.12 kapandı,
+  dal `katman-3.12-akustik`). GS solo tab F1 **0.777 / 0.777**, oracle tel 0.878, GAPS test nota/kare **0.779 / 0.701**,
+  GS val 0.924 / 0.879, val_comp 0.807 / 0.827; gaps_fit 0.784 ≈ gaps_val 0.780. Çözümleme perde-onset kafasından
+  (`--onset-source pitch`). Sırada **Katman 4** (kullanıcı talimatı bekleniyor). Açıklar: GAPS <100 ms tekrarlar,
+  "perde hiç aktif değil" kaçanlar (%36), akor fragmanları. Aşağıdaki maddeler geçmiş kayıttır.
+- **Eski taban: `checkpoints/tabcrnn_rep_off.pt`** (TabCRNNOnset + harmonik istifleme + offset kafası;
   tabcrnn_poly'den `train_onset --repeat-weight 3 --pitch-weight 2 --offset-weight 1`).
   GS solo tab F1 **0.760**, oracle tel 0.862, GAPS test nota/kare **0.689/0.675**, val_comp 0.769/0.817,
   GS val 0.915/0.871. Çözümleme (val seçimi): onset@0.2, eşik 0.7, refrakter 6, yedek 10, tepe,
@@ -69,7 +74,31 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   aday seçimi; README12 §8b). **Adım 1b kodlandı (9 Ekim):** `re_valley`, `calibrate_repeats` (REP_GRID, `--rep-tol 0.01`),
   eval_pitch tekrar kaçma sütunu; testler + regresyon ✓ → **kullanıcı ölçümü bekleniyor** (README12 §8c).
   **1b ölçüldü (9 Ekim):** GAPS 0.733/0.676, tekrarlar değişmedi — vadi kanıtı precision'ı çökertiyor (fragman vadisi
-  = gerçek tekrar vadisi) → eğitimsiz yol GAPS için tükendi; GS tab F1 0.760 (nötr) → 1b kabul; **sıradaki: Adım 4 eğitim** (kullanıcı onayı bekleniyor).
+  = gerçek tekrar vadisi) → eğitimsiz yol GAPS için tükendi; GS tab F1 0.760 (nötr) → 1b kabul. **Adım 4 kodlandı (9 Ekim):** `train_onset --valley-weight 5 --frag-weight 3
+  --oversample 3` → `tabcrnn_rep_valley.pt` (init rep_off); varsayılan = HEAD birebir; **kullanıcı eğitimi bekleniyor**
+  (README12 §8e). Sonrasında 3.11 kapanışı ve **Katman 4'e geçiş** (kullanıcı kararı).
+  **Adım 4 ölçüldü (9 Ekim, README12 §8f):** `tabcrnn_rep_valley.pt` tab F1 **0.769 / 0.771** (en iyi), GAPS 0.720/0.684,
+  val_comp 0.783/0.818, GS val 0.916/0.880; tekrar kaçma 100–200 ms −10 puan, <100 ms değişmedi (~%73–78).
+  Kabul kuralı sağlanmadı (GAPS nota −0.013). 3.11 kapandı; taban **`tabcrnn_rep_valley.pt`**.
+- **Katman 3.12 sürüyor** (`docs/devlog/README13.md`): akustik katman. Adım 0 kapasite ölçümü kodlandı
+  (`eval_pitch/diagnose_pitch --load-cal checkpoints/tabcrnn_rep_valley.cal.json`, sanal split `gaps_fit`;
+  kalibrasyonsuz ~1 dk). **Ölçüldü:** GAPS eğitim ≈ doğrulama (0.723 / 0.718); aşırı öğrenme testi
+  (`scripts/train/overfit_gaps.py`; ana ölçüt ONSET F1, dropout kapalı, GuitarSet kontrolü; 8 kayıt, 200 epoch, ~4 dk):
+  GuitarSet 0.995 (kurulum doğru), GAPS onset 0.40 → 0.95 → etiket tavanı yok, **kapasite → sırada 3a**
+  (derin CNN + perde-onset kafası + vadi; kullanıcı onayı). Kare F1'i ana ölçüt yapma (GAPS nota bitişi partisyondan).
+  **3a kodlandı (9 Ekim):** `--deep 2 --pitch-onset-weight 1 --new-lr-mult 3` (artık bloklar sıfır-gamma → birebir
+  aynı başlangıç; perde-onset kafası; ayrı lr; kafa başına log); kalibrasyon kafa varsa tel/kafa iki zincir (~2 saat,
+  `--save-cal` ile sonra hızlı). **Kullanıcı: 2 epoch deneme → 15 epoch `tabcrnn_deep.pt`** (README13 §3a). Ana hedef
+  GAPS onset F1 (model düzeyi) ≥ +0.03; kapasite tekrar (fark > 0.05 → 3b).
+  **tabcrnn_deep.pt (15 ep):** GAPS onset (kafa) 0.377 → **0.509**, GS tab 0.707, seçim 0.627. Sırada devam eğitimi
+  `tabcrnn_deep2.pt` (`--lr 1e-4`); seç: deep2 kafa ≥ 0.519 ve GS tab ≥ 0.697 → deep2, değilse deep; sonra seçilende
+  BİR KEZ kalibrasyon (`--save-cal`), kapasite, tanılama, tab F1 (README13).
+  **deep2 seçildi (9 Ekim):** kafa 0.524, GS tab 0.716 (plato). Sırada tabcrnn_deep2'de kalibrasyon → kapasite → tanılama → tab F1.
+  **a) kalibrasyon (10 Ekim, `tabcrnn_deep2.cal.json`):** iki alanda da perde-onset kafası seçildi; GAPS test nota/kare
+  **0.779 / 0.701** (0.720 → +0.059), val 0.924 / 0.879, val_comp 0.807 / 0.827; <100 ms tekrar kaçma ~%76 (değişmedi).
+  **b–d (10 Ekim):** kapasite farkı 0.004 (3b gerekmedi), gaps_val tekrar kaçma <100 ms 73 → 55, tab F1 0.777 →
+  kabul ✓ → **3.12 KAPANDI**, taban `tabcrnn_deep2.pt` (README13 Karar).
+  Hız: kalibrasyon seçimi değişmediyse her zaman `--load-cal` kullan (tam kalibrasyon ~1 saat).
   val_comp tekrar kaçma <100 ms 72.5 → 22.5 ama GS val nota −0.014. `.venv`'e CUDA torch kuruldu (requirements.txt cu121).
 - Tel tarafı (gerekirse): A teli 0.66; adaylar 36 bin/oktav önbellek, hex öğretmen
   damıtması, SynthTab naylon + GAPS partisyon TAB etiketleri (`.match`).

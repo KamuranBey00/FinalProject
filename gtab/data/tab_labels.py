@@ -150,3 +150,51 @@ def repeat_onset_weights(lab, on_mask, gap=3, weight=3.0, span=2):
     w = np.ones((T, K), np.float32)
     w[m & (lab > 0)] = weight
     return w
+
+
+FAST_IOI = 8          # kare (~186 ms): "hızlı tekrar" = iki aynı perde vuruşu arası < 200 ms
+
+
+def valley_frames(lab, on_mask, gap=3, max_ioi=FAST_IOI):
+    """
+    Katman 3.11 Adım 4 — HIZLI aynı perde tekrarları: (T, K) etiket + (T, K) keskin onset ->
+      valley (T, K) bool: iki yakın aynı perde onset'i ARASINDAKİ kareler ("burada vuruş yok")
+      fast   (T, K) bool: hızlı tekrar onset'leri (örnekleme için)
+    Tekrar tanımı repeat_onset_weights ile aynı (önceki aynı değerli nota <= gap kare önce bitti),
+    ek olarak iki onset arası <= max_ioi kare.
+    """
+    lab = np.asarray(lab); on = np.asarray(on_mask) > 0
+    T, K = lab.shape
+    valley = np.zeros((T, K), bool); fast = np.zeros((T, K), bool)
+    for k in range(K):
+        ts = np.nonzero(on[:, k] & (lab[:, k] > 0))[0]
+        for t0, t1 in zip(ts, ts[1:]):
+            if t1 - t0 > max_ioi or lab[t0, k] != lab[t1, k]:
+                continue
+            if (lab[max(0, t1 - gap - 1):t1, k] == lab[t1, k]).any():
+                valley[t0 + 1:t1, k] = True
+                fast[t1, k] = True
+    return valley, fast
+
+
+def fragment_frames(curve, lab, on_mask, thr=0.1, prominence=0.1, tol=2):
+    """
+    Katman 3.11 Adım 4 — FRAGMAN negatifleri: (T, K) model onset eğrisi -> (T, K) bool.
+    Etiket notası sürerken (lab > 0) modelin yerel tepe verdiği ama etikette ±tol karede onset OLMAYAN
+    yerler (tepe ±1 kare). GAPS etiketleri partisyondan geldiği için gerçek vuruşa yakın yerler (±tol)
+    hiçbir zaman negatif yapılmaz.
+    """
+    from gtab.decoding.viterbi import pick_peaks
+    lab = np.asarray(lab); on = np.asarray(on_mask) > 0
+    T, K = lab.shape
+    near = on.copy()
+    for d in range(1, tol + 1):
+        near[d:] |= on[:-d]; near[:-d] |= on[d:]
+    out = np.zeros((T, K), bool)
+    for k in range(K):
+        if not (lab[:, k] > 0).any():
+            continue
+        for t in pick_peaks(curve[:, k], thr, 2, prominence):
+            if lab[t, k] > 0 and not near[t, k]:
+                out[max(0, t - 1):t + 2, k] = True
+    return out & ~near & (lab > 0)

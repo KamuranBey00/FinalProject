@@ -29,7 +29,8 @@ def load_model(kind, device, ckpt=None, instrument=STANDARD_6):
     if kind == "crnn":
         if ck.get("onset"):
             m = TabCRNNOnset(instrument.num_strings, ck["n_classes"], harmonics=ck.get("harmonics"),
-                             offset=bool(ck.get("offset"))).to(device)
+                             offset=bool(ck.get("offset")), deep=int(ck.get("deep") or 0),
+                             pitch_onset=bool(ck.get("pitch_onset"))).to(device)
         else:
             m = TabCRNN(instrument.num_strings, ck["n_classes"], harmonics=ck.get("harmonics")).to(device)
     else:
@@ -67,11 +68,21 @@ def predict_with_onsets(model, cqt, device):
     return tab, on
 
 
-def predict_heads(model, cqt, device):
+def predict_heads(model, cqt, device, with_pitch_onset=False):
     """
     Katman 3.10 Adım 3c — tüm kafalar: (tab softmax (T,S,C), onset (T,S) | None, offset (T,S) | None).
     Offset kafası yoksa predict_with_onsets ile birebir aynı.
+    with_pitch_onset (Katman 3.12): 4. öğe perde-onset kafası (T,P) | None.
     """
+    if with_pitch_onset:
+        if getattr(model, "pitch_onset_head", None) is None:
+            return tuple(predict_heads(model, cqt, device)) + (None,)
+        def fullh(x):
+            tab, on, off, pon = model.forward_full(x)
+            o = torch.sigmoid(off) if off is not None else torch.zeros_like(on)
+            return torch.softmax(tab, -1), torch.sigmoid(on), o, torch.sigmoid(pon)
+        tab, on, off, pon = _chunked(fullh, cqt, device)
+        return tab, on, (off if model.offset_head is not None else None), pon
     if getattr(model, "offset_head", None) is None:
         tab, on = predict_with_onsets(model, cqt, device)
         return tab, on, None

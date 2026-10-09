@@ -41,7 +41,7 @@ import numpy as np
 
 from gtab.core.instrument import STANDARD_6
 from gtab.decoding.viterbi import pick_peaks, pitch_matrix, pitch_onset_matrix, segment
-from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, load_split, roll_to_notes,
+from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, load_selection, load_split, roll_to_notes,
                                         selection_split, to_mir)
 from gtab.models.inference import load_model
 from gtab.utils import get_device
@@ -84,13 +84,17 @@ def analyse(data, thr, ot, dec=None):
     for probs, ons, frame, onset, *rest in data:
         rise = rest[0] if rest else None
         offs = rest[1] if len(rest) > 1 and rest[1] is not None else None
+        pons = rest[2] if len(rest) > 2 and rest[2] is not None else None     # Katman 3.12
+        use_p = pons is not None and (dec or {}).get("onset_source") == "pitch"
+        pon_n = None
         comb = (dec or {}).get("combine", "max")
         pm, _ = pitch_matrix(probs, INSTR, comb)
         n = min(len(pm), len(frame))
         pm, fr, on = pm[:n], frame[:n] > 0, onset[:n] > 0
+        pon_n = pons[:n] if use_p else None
         est = segment(probs[:n], None if ons is None else ons[:n], thr, ot, INSTR,
                       rise=None if rise is None else rise[:n], offsets=None if offs is None else offs[:n],
-                      **(dec or {}))
+                      pitch_onsets=pon_n, **(dec or {}))
         ref = roll_to_notes(fr, on, lo)
         n_ref += len(ref); n_est += len(est)
         ri, rp = to_mir(ref); ei, ep = to_mir(est)
@@ -136,13 +140,14 @@ def analyse(data, thr, ot, dec=None):
                 miss_by[k][v] += 1
 
         # ---- D) hayalet alt kırılımı + onset tepe değerleri
-        om = pitch_onset_matrix(probs[:n], ons[:n], INSTR, comb) if ons is not None else None
+        om = (pon_n if pon_n is not None else
+              pitch_onset_matrix(probs[:n], ons[:n], INSTR, comb) if ons is not None else None)
         no_fb = None
         if dec and dec.get("fallback", 0) and ot is not None:
             no_fb = {(e[0], e[2]) for e in segment(probs[:n], ons[:n], thr, ot, INSTR,
                                                     rise=None if rise is None else rise[:n],
                                                     offsets=None if offs is None else offs[:n],
-                                                    **dict(dec, fallback=0))}
+                                                    pitch_onsets=pon_n, **dict(dec, fallback=0))}
         last_end = {}
         for j, (a, b, p) in enumerate(est):
             pk = float(om[a:min(n, a + 3), p - lo].max()) if om is not None and a < n else np.nan
@@ -208,6 +213,8 @@ def analyse(data, thr, ot, dec=None):
         #      ±1 karesinde ayrı bir yerel tepe var mı? (eşik = seçili onset eşiği)
         if ons is not None and ot is not None:
             oms = {c: pitch_onset_matrix(probs[:n], ons[:n], INSTR, c) for c in ("max", "noisyor")}
+            if pons is not None:
+                oms["kafa"] = pons[:n]                 # Katman 3.12: perde-onset kafası
             prev_e = {}; prev_a = {}
             for i, (a, b, p) in enumerate(ref):
                 if p in prev_e and a - prev_e[p] <= 3:
@@ -219,6 +226,8 @@ def analyse(data, thr, ot, dec=None):
                 vis_tot[cat] += 1
                 hit = False
                 for key, c, pr in VIS_KEYS:
+                    if c not in oms:
+                        continue
                     pk = peaks_cache.setdefault((id(probs), key, p),
                                                 np.array(pick_peaks(oms[c][:, p - lo], ot, 1, pr)))
                     v = bool(len(pk)) and np.abs(pk - a).min() <= 1
@@ -266,7 +275,7 @@ def analyse(data, thr, ot, dec=None):
 
 # Katman 3.11 Adım 0: görünürlük ölçüsü = (ad, birleştirme, vadi derinliği); en az ara 1 kare
 VIS_KEYS = (("max / vadi 0.10", "max", 0.10), ("noisyor / vadi 0.10", "noisyor", 0.10),
-            ("noisyor / vadi 0.25", "noisyor", 0.25))
+            ("noisyor / vadi 0.25", "noisyor", 0.25), ("kafa / vadi 0.10", "kafa", 0.10))
 VIS_MAIN = "noisyor / vadi 0.10"
 VIS_CATS = ("<100 ms", "100-200 ms", ">=200 ms", "tekrarsiz")
 
@@ -276,13 +285,14 @@ def report_visibility(r):
         return
     print()
     print("  F) Tepe gorunurlugu (Katman 3.11 Adim 0): gercek notanin +-1 karesinde onset egrisinde ayri tepe")
-    print(f"    {'grup':<12}{'n':>7}  " + "  ".join(f"{k:>20}" for k, _, _ in VIS_KEYS)
+    keys = [k for k, _, _ in VIS_KEYS if sum(r["vis"][k].values())]      # kafa yoksa kafa sütunu gizli
+    print(f"    {'grup':<12}{'n':>7}  " + "  ".join(f"{k:>20}" for k in keys)
           + f"  {'kacan':>7}  {'kacanlardan gorunur':>20}")
     for c in VIS_CATS:
         n_ = r["vis_tot"][c]
         if not n_:
             continue
-        print(f"    {c:<12}{n_:>7}  " + "  ".join(f"{pct(r['vis'][k][c], n_):>20}" for k, _, _ in VIS_KEYS)
+        print(f"    {c:<12}{n_:>7}  " + "  ".join(f"{pct(r['vis'][k][c], n_):>20}" for k in keys)
               + f"  {pct(r['vis_miss'][c], n_):>7}  {pct(r['vis_miss_vis'][c], r['vis_miss'][c]):>20}")
     print(f"    'kacanlardan gorunur' = model tepeyi vermis ama cozumleme notayi kaybetmis ({VIS_MAIN}) "
           "-> cozumleme tavani")
@@ -362,7 +372,7 @@ def report_repeats(r):
 
 
 def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_search=True, limit=None,
-         rep_search=True, rep_tol=0.01):
+         rep_search=True, rep_tol=0.01, load_cal=None):
     device = get_device()
     model, ck, kind = load_model("crnn", device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -372,11 +382,15 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_s
     cache = {}
     for split in splits:
         sel = selection_split(split, "auto")
-        if sel not in cache:
-            cache[sel] = load_split(sel, model, ck, kind, device, limit)
-        f1, thr, ot, dec = calibrate(cache[sel], on_grid, DEC_GRID if dec_search else None, criterion,
-                                     peak_search, rep_search, rep_tol)
-        data = cache[sel] if sel == split else load_split(split, model, ck, kind, device, limit)
+        if load_cal:                              # kalibrasyon dosyadan: arama yok
+            f1, thr, ot, dec = load_selection(load_cal)[sel]
+            data = load_split(split, model, ck, kind, device, limit)
+        else:
+            if sel not in cache:
+                cache[sel] = load_split(sel, model, ck, kind, device, limit)
+            f1, thr, ot, dec = calibrate(cache[sel], on_grid, DEC_GRID if dec_search else None, criterion,
+                                         peak_search, rep_search, rep_tol)
+            data = cache[sel] if sel == split else load_split(split, model, ck, kind, device, limit)
         print(f"\n{'=' * 78}\n{split}  ({len(data)} kayit) | esikler '{sel}' uzerinde: perde {thr}, "
               f"cozumleme {'kare-esik' if ot is None else f'onset@{ot}'}"
               + (f" {dec}" if ot is not None else "") + f"\n{'=' * 78}")
@@ -399,6 +413,7 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=None, help="split basina en fazla kayit (duman testi)")
     ap.add_argument("--no-rep-search", action="store_true", help="Katman 3.11 Adim 1b aramasini yapma")
     ap.add_argument("--rep-tol", type=float, default=0.01, help="Adim 1b: feda edilebilecek dogrulama skoru")
+    ap.add_argument("--load-cal", default=None, help="kalibrasyon secimini JSON'dan oku (eval_pitch --save-cal)")
     a = ap.parse_args()
     main(a.ckpt, a.splits, a.onset_thr, not a.no_dec_search, a.criterion, not a.no_peak_search, a.limit,
-         not a.no_rep_search, a.rep_tol)
+         not a.no_rep_search, a.rep_tol, a.load_cal)

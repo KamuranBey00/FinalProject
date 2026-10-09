@@ -95,3 +95,18 @@ def pitch_offset_target(frame, onset, soft=None):
     cur = frame > 0.5
     same = torch.zeros_like(cur); same[:, :-1] = cur[:, 1:]
     return _offset_from(cur, same, onset, soft)
+
+
+def tab_pitch_onset_target(y, onset, idx):
+    """
+    Katman 3.12 — tab etiketi (B,L,S) + tel onset hedefi (B,L,S; keskin/soft) -> (B,L,P) perde-onset hedefi:
+    her perde için o perdeyi çalan tellerin onset hedeflerinin en büyüğü (perde-onset kafası, GuitarSet).
+    """
+    hit = (y.unsqueeze(-1) == idx.view(1, 1, *idx.shape)) & (idx >= 0).view(1, 1, *idx.shape)
+    return (hit.float() * onset.unsqueeze(-1)).amax(2)
+
+
+def tab_pitch_weight(y, w, idx):
+    """(B,L,S) tel ağırlığı -> (B,L,P) perde ağırlığı (o perdeyi çalan tellerin en büyüğü; çalınmayan perde 1)."""
+    hit = (y.unsqueeze(-1) == idx.view(1, 1, *idx.shape)) & (idx >= 0).view(1, 1, *idx.shape)
+    return torch.clamp((hit.float() * w.unsqueeze(-1)).amax(2), min=1.0)

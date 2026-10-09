@@ -27,7 +27,8 @@ nota F1 ile seçilir. Test setlerine seçimde HİÇ bakılmaz.
 
 import argparse
 
-from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, evaluate_split, load_split,
+from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, evaluate_split, load_split, load_selection,
+                                        save_selection,
                                         selection_split)
 from gtab.models.inference import load_model
 from gtab.utils import get_device
@@ -35,7 +36,7 @@ from gtab.utils import get_device
 
 # ----------------------------------------------------------------- ana akış
 def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_search=True, criterion="note",
-         force_rise=None, peak_search=True, rep_search=True, rep_tol=0.01):
+         force_rise=None, peak_search=True, rep_search=True, rep_tol=0.01, load_cal=None, save_cal=None):
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -49,9 +50,13 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
     print(f"Cozumleme adaylari: " + ", ".join("kare-esik" if o is None else f"onset@{o}" for o in on_grid)
           + f" | esik secimi: {select_split}")
 
-    cal = {}                                              # dogrulama split'i -> secim
+    cal = load_selection(load_cal) if load_cal else {}    # dogrulama split'i -> secim
+    if load_cal:
+        print(f"Kalibrasyon secimi dosyadan: {load_cal} ({', '.join(cal)}) -> arama yok, yalniz secilen esik")
     def get_cal(sp):
         if sp not in cal:
+            if load_cal:
+                raise KeyError(f"{load_cal} icinde '{sp}' secimi yok")
             cal[sp] = calibrate(load_split(sp, model, ck, kind, device, limit), on_grid,
                                 DEC_GRID if dec_search else None, criterion, peak_search, rep_search, rep_tol)
             f1, t, o, dec = cal[sp]
@@ -61,10 +66,13 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
                      f", tepe={dec.get('peak', False)}, yeniden_vurus={dec.get('reattack', 0.0)}"
                      f", enerji_kabul={dec.get('rise_keep', 0.0)}, enerji_bol={dec.get('rise_split', 0.0)}"
                      f", offset={dec.get('offset_threshold', 0.0)}, birlestirme={dec.get('combine', 'max')}"
+                     f", onset_kaynagi={dec.get('onset_source', 'string')}"
                      f", yerel_tepe={dec.get('peak_pick', False)}"
                      + (f" (vadi={dec['prominence']}, ara={dec['min_dist']}, vadi_kaniti={dec.get('re_valley', 0.0)})"
                         if dec.get('peak_pick') else "")
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
+            if save_cal:
+                save_selection(save_cal, cal)
         return cal[sp]
 
     summary = []
@@ -75,7 +83,8 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
             dec = dict(dec, rise_keep=force_rise[0], rise_split=force_rise[1])
             print(f"  [{split}] ABLASYON: enerji_kabul={force_rise[0]}, enerji_bol={force_rise[1]} sabitlendi "
                   f"(digerleri '{sp}' secimi)")
-        res = evaluate_split(load_split(split, model, ck, kind, device, limit), onset_thr=ot, dec=dec)
+        res = evaluate_split(load_split(split, model, ck, kind, device, limit), onset_thr=ot, dec=dec,
+                             **({"thresholds": [thr]} if load_cal else {}))
         print(f"\n=== {split}  (esikler '{sp}' uzerinde secildi; cozumleme: "
               f"{'kare-esik' if ot is None else f'onset@{ot}'}) ===")
         print(f"  {'esik':>5} | {'nota P':>7} {'R':>6} {'F1':>6} | {'kare P':>7} {'R':>6} {'F1':>6}")
@@ -126,6 +135,9 @@ if __name__ == "__main__":
                     help="Katman 3.11 Adim 1b (tekrar kapilarinin ortak aramasi) yapma; Adim 1 secimi birebir")
     ap.add_argument("--rep-tol", type=float, default=0.01,
                     help="Adim 1b: dogrulama skorundan bu kadar feda edilerek tekrar kacma orani en dusuk aday secilir")
+    ap.add_argument("--save-cal", default=None, help="kalibrasyon secimini bu JSON dosyasina yaz")
+    ap.add_argument("--load-cal", default=None,
+                    help="kalibrasyon secimini JSON'dan oku (arama yok, yalniz secilen esik) -> hizli")
     a = ap.parse_args()
     main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr, not a.no_dec_search, a.criterion,
-         a.force_rise, not a.no_peak_search, not a.no_rep_search, a.rep_tol)
+         a.force_rise, not a.no_peak_search, not a.no_rep_search, a.rep_tol, a.load_cal, a.save_cal)

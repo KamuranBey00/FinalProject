@@ -189,8 +189,10 @@ def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
     print(f"  {'esik':>5} {'w_tr':>5} {'P':>7} {'R':>7} {'F1':>7}")
     for thr in thresholds:
         segs_all, lats = [], []
-        for probs, gt, ons, rise, offs in data:
-            segs = segment(probs, ons, thr, onset_thr, INSTR, rise=rise, offsets=offs, **(dec or {}))
+        for probs, gt, ons, rise, offs, pons in data:
+            pp = pons if (dec or {}).get("onset_source") == "pitch" else None      # Katman 3.12
+            segs = segment(probs, ons, thr, onset_thr, INSTR, rise=rise, offsets=offs, pitch_onsets=pp,
+                           **(dec or {}))
             segs_all.append(segs)
             lats.append(build_lattice(segs, probs, tm, time_unit="frames"))
         for w in w_trs:
@@ -229,8 +231,8 @@ def end_to_end(tm, data, quick=False, onset_thr=None, dec=None):
 # ----------------------------------------------------------------- ana akış
 def _predict(model, ck, kind, cqt, device):
     if hasattr(model, "onset_head"):
-        return predict_heads(model, cqt, device)
-    return predict_probs(model, ck, kind, cqt, device), None, None
+        return predict_heads(model, cqt, device, with_pitch_onset=True)
+    return predict_probs(model, ck, kind, cqt, device), None, None, None
 
 
 def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None, dec=None):
@@ -243,8 +245,8 @@ def main(kind="crnn", quick=False, refit=False, ckpt=None, onset_thr=None, dec=N
     data, probs_list = [], []
     for f in val_files:
         with np.load(f) as d:
-            probs, ons, offs = _predict(model, ck, kind, _normalize(d["cqt"]), device)
-            data.append((probs, d["tab"].astype(np.int64), ons, energy_rise(d["cqt"], INSTR), offs))
+            probs, ons, offs, pons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+            data.append((probs, d["tab"].astype(np.int64), ons, energy_rise(d["cqt"], INSTR), offs, pons))
         probs_list.append(probs)
     print(f"{len(data)} val kaydi islendi.")
 
@@ -264,12 +266,13 @@ def demo(npz_path, kind="crnn", threshold=0.8, w_transition=1.0, ckpt=None, onse
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     with np.load(npz_path) as d:
-        probs, ons, offs = _predict(model, ck, kind, _normalize(d["cqt"]), device)
+        probs, ons, offs, pons = _predict(model, ck, kind, _normalize(d["cqt"]), device)
         rise = energy_rise(d["cqt"], INSTR)
     if onset_thr is None:
         onset_thr = ck.get("onset_thr") or 0.5
     segs = segment(probs, ons, threshold, onset_thr if onset_thr >= 0 else None, INSTR, rise=rise,
-                   offsets=offs, **(dec or {}))
+                   offsets=offs, pitch_onsets=pons if (dec or {}).get("onset_source") == "pitch" else None,
+                   **(dec or {}))
     asg = decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
     events = []
     for (a, b, pitch), (s, f) in zip(segs, asg):
@@ -305,16 +308,20 @@ if __name__ == "__main__":
     ap.add_argument("--prominence", type=float, default=0.1, help="Katman 3.11: vadi derinligi")
     ap.add_argument("--min-dist", type=int, default=2, help="Katman 3.11: tepeler arasi en az kare")
     ap.add_argument("--re-valley", type=float, default=0.0, help="Katman 3.11 Adim 1b: vadi kaniti (0 = kapali)")
+    ap.add_argument("--onset-source", default="string", choices=["string", "pitch"],
+                    help="Katman 3.12: nota bulma tel-onset yolundan mi perde-onset kafasindan mi")
     args = ap.parse_args()
     if args.demo:
         dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
                    rise_keep=args.rise_keep, rise_split=args.rise_split,
                    offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
-                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley)
+                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley,
+                   onset_source=args.onset_source)
         demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
         dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
                    rise_keep=args.rise_keep, rise_split=args.rise_split,
                    offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
-                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley)
+                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley,
+                   onset_source=args.onset_source)
         main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)

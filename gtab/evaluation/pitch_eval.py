@@ -10,7 +10,10 @@ Perde/nota değerlendirme çekirdeği (eval_pitch ve diagnose_pitch ortak kullan
 """
 
 import glob
+import json
 import os
+import sys
+import time
 
 import mir_eval
 import numpy as np
@@ -54,7 +57,7 @@ def to_mir(notes):
     return iv, hz
 
 
-def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=None, offs=None):
+def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=None, offs=None, pons=None):
     """
     -> dict(frame tp/fp/fn, note tp-sayıları, polifoni grupları)
     ons (T,S) verilirse (onset kafalı model) notalar onset ile başlatılır ve kare
@@ -63,9 +66,11 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=N
     pm, lo = pitch_matrix(probs, INSTR)
     n = min(len(pm), len(frame))
     frame, onset = frame[:n] > 0, onset[:n] > 0
+    # Katman 3.12: pons (perde-onset kafası) varsa ve seçim 'string' demiyorsa nota bulma kafadan
+    use_p = pons is not None and (dec or {}).get("onset_source") != "string"
     est = segment(probs[:n], None if ons is None else ons[:n], thr, onset_thr, INSTR,
                   rise=None if rise is None else rise[:n], offsets=None if offs is None else offs[:n],
-                  **(dec or {}))
+                  pitch_onsets=pons[:n] if use_p else None, **(dec or {}))
     if ons is None or onset_thr is None:
         pred = pm[:n] > thr
     else:
@@ -131,6 +136,8 @@ def aggregate(results):
 def load_split(split, model, ck, kind, device, limit=None):
     if split == "gaps_val":                       # sanal split: gaps_train'in icraci-ayrik dogrulamasi
         files = gaps_files("gaps_train")[1][:limit]
+    elif split == "gaps_fit":                     # sanal split: gaps_train'in yalnız EĞİTİMDE kullanılan kısmı
+        files = gaps_files("gaps_train")[0][:limit]
     else:
         files = sorted(glob.glob(os.path.join(CACHE_DIR, split, "*.npz")))[:limit]
     if not files:
@@ -140,18 +147,60 @@ def load_split(split, model, ck, kind, device, limit=None):
         with np.load(f) as d:
             cqt = _normalize(d["cqt"])
             if hasattr(model, "onset_head"):
-                probs, ons, offs = predict_heads(model, cqt, device)
+                probs, ons, offs, pons = predict_heads(model, cqt, device, with_pitch_onset=True)
             else:
-                probs, ons, offs = predict_probs(model, ck, kind, cqt, device), None, None
-            # 5. öğe: perde başına CQT enerji yükselişi (Adım 3 revizyonu); 6.: tel offset'i (Adım 3c)
-            data.append((probs, ons, d["frame"], d["onset"], energy_rise(d["cqt"], INSTR), offs))
+                probs, ons, offs, pons = predict_probs(model, ck, kind, cqt, device), None, None, None
+            # 5. öğe: perde başına CQT enerji yükselişi (Adım 3 revizyonu); 6.: tel offset'i (Adım 3c);
+            # 7.: perde-onset kafası (Katman 3.12) | None
+            data.append((probs, ons, d["frame"], d["onset"], energy_rise(d["cqt"], INSTR), offs, pons))
     return data
 
 
 def evaluate_split(data, thresholds=THRESHOLDS, onset_thr=None, dec=None):
-    return {thr: aggregate([track_scores(p, o, fr, on, thr, onset_thr, dec, *rest)
-                            for p, o, fr, on, *rest in data])
-            for thr in thresholds}
+    out = {}
+    for thr in thresholds:
+        out[thr] = aggregate([track_scores(p, o, fr, on, thr, onset_thr, dec, *rest)
+                              for p, o, fr, on, *rest in data])
+        if _PROG is not None:
+            _PROG.step()
+    return out
+
+
+class _Progress:
+    """Katman 3.12: kalibrasyon ilerleme çubuğu (stderr, tek satır). Birim = bir eşikte tüm split'in
+    çözümlenmesi; toplam koşullu aşamalar yüzünden tahmindir (bitmeden %99'da durur)."""
+
+    def __init__(self, label, total):
+        self.label, self.total, self.done, self.t0 = label, max(total, 1), 0, time.time()
+
+    def step(self):
+        self.done += 1
+        el = time.time() - self.t0
+        frac = min(self.done / self.total, 0.99)
+        eta = el / frac * (1 - frac)
+        sys.stderr.write(f"\r  [{self.label}] [{'#' * int(20 * frac):<20}] %{100 * frac:3.0f} | "
+                         f"{el / 60:4.1f} dk, kalan ~{eta / 60:4.1f} dk ")      # < 80 sütun (satır kaymasın)
+        sys.stderr.flush()
+
+    def close(self):
+        sys.stderr.write(f"\r  [{self.label}] [{'#' * 20}] %100 | {(time.time() - self.t0) / 60:4.1f} dk"
+                         + " " * 16 + "\n")
+        sys.stderr.flush()
+
+
+_PROG = None
+
+
+def _n_units(data, on_grid, dec_grid, peak_search, rep_search):
+    """_calibrate'in yapacağı evaluate_split birimi sayısı (koşullu dallar en çok sayılır)."""
+    n = len(on_grid) * len(THRESHOLDS)
+    if dec_grid:
+        n += 3 * len(dec_grid) + 1 + len(REATTACK_GRID) + len(RISE_GRID)
+        n += len(OFFSET_GRID) if len(data[0]) > 5 and data[0][5] is not None else 0
+        if peak_search:
+            n += 1 + 2 * len(PEAK_GRID) + 2 + 4 + 3
+            n += 1 + len(REP_GRID) if rep_search else 0
+    return n
 
 
 def selection_split(split, select_split):
@@ -250,7 +299,48 @@ def calibrate_repeats(data, best_on, criterion="note", tol=0.01):
     return (s, t0, o0, dec)
 
 
+def save_selection(path, cal):
+    """Kalibrasyon seçimi {doğrulama split'i: (skor, perde eşiği, onset eşiği, dec)} -> JSON."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({k: list(v) for k, v in cal.items()}, f, indent=2)
+
+
+def load_selection(path):
+    """save_selection'ın tersi; kalibrasyon aramasını atlamak için (eval_pitch / diagnose_pitch --load-cal)."""
+    with open(path, encoding="utf-8") as f:
+        return {k: tuple(v) for k, v in json.load(f).items()}
+
+
 def calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True, rep_search=True, rep_tol=0.01):
+    """
+    Katman 3.12: model perde-onset kafası veriyorsa iki zincir ayrı ayrı baştan sona aranır — eski tel-onset
+    yolu ('string') ve kafa ('pitch'); doğrulamada iyi olan seçilir, dec['onset_source'] kaynağı taşır.
+    Kafa yoksa tek zincir (eski davranış, birebir).
+    """
+    if not data or len(data[0]) < 7 or data[0][6] is None:
+        return _calibrate_prog("kalibrasyon", data, on_grid, dec_grid, criterion, peak_search, rep_search, rep_tol)
+    res = {}
+    for src, d in (("string", [t[:6] + (None,) for t in data]), ("pitch", data)):
+        f, t, o, dec = _calibrate_prog(f"kalibrasyon {src}", d, on_grid, dec_grid, criterion, peak_search,
+                                       rep_search, rep_tol)
+        res[src] = (f, t, o, dict(dec, onset_source=src))
+    print(f"  [kalibrasyon] dogrulama skoru: tel-onset yolu {res['string'][0]:.3f} | "
+          f"perde-onset kafasi {res['pitch'][0]:.3f}")
+    return max(res.values(), key=lambda r: r[0])
+
+
+def _calibrate_prog(label, data, on_grid, dec_grid, criterion, peak_search, rep_search, rep_tol):
+    """_calibrate + ilerleme çubuğu."""
+    global _PROG
+    _PROG = _Progress(label, _n_units(data, on_grid, dec_grid, peak_search, rep_search))
+    try:
+        return _calibrate(data, on_grid, dec_grid, criterion, peak_search, rep_search, rep_tol)
+    finally:
+        _PROG.close()
+        _PROG = None
+
+
+def _calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True, rep_search=True, rep_tol=0.01):
     """
     Doğrulama verisinde seçim (test setine hiç bakılmaz):
       1) çözümleme yöntemi (kare-eşik / onset@eşik) + perde eşiği
