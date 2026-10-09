@@ -361,7 +361,8 @@ def report_repeats(r):
               f"                     {f(rg, lambda a: a < x)} / {f(ro, lambda a: a < x)}")
 
 
-def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_search=True, limit=None):
+def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_search=True, limit=None,
+         rep_search=True, rep_tol=0.01):
     device = get_device()
     model, ck, kind = load_model("crnn", device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -374,7 +375,7 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_s
         if sel not in cache:
             cache[sel] = load_split(sel, model, ck, kind, device, limit)
         f1, thr, ot, dec = calibrate(cache[sel], on_grid, DEC_GRID if dec_search else None, criterion,
-                                     peak_search)
+                                     peak_search, rep_search, rep_tol)
         data = cache[sel] if sel == split else load_split(split, model, ck, kind, device, limit)
         print(f"\n{'=' * 78}\n{split}  ({len(data)} kayit) | esikler '{sel}' uzerinde: perde {thr}, "
               f"cozumleme {'kare-esik' if ot is None else f'onset@{ot}'}"
@@ -396,5 +397,8 @@ if __name__ == "__main__":
     ap.add_argument("--no-peak-search", action="store_true",
                     help="Katman 3.11 aramasini yapma: 3.10 cozumlemesiyle olc (Adim 0 tavan olcumu)")
     ap.add_argument("--limit", type=int, default=None, help="split basina en fazla kayit (duman testi)")
+    ap.add_argument("--no-rep-search", action="store_true", help="Katman 3.11 Adim 1b aramasini yapma")
+    ap.add_argument("--rep-tol", type=float, default=0.01, help="Adim 1b: feda edilebilecek dogrulama skoru")
     a = ap.parse_args()
-    main(a.ckpt, a.splits, a.onset_thr, not a.no_dec_search, a.criterion, not a.no_peak_search, a.limit)
+    main(a.ckpt, a.splits, a.onset_thr, not a.no_dec_search, a.criterion, not a.no_peak_search, a.limit,
+         not a.no_rep_search, a.rep_tol)

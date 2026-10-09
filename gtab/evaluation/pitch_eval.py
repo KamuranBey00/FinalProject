@@ -77,14 +77,26 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=N
 
     ref = roll_to_notes(frame, onset, lo)
     ri, rp = to_mir(ref); ei, ep = to_mir(est)
+    m_ref = set()
     if len(ref) and len(est):
-        matched = len(mir_eval.transcription.match_notes(ri, rp, ei, ep, onset_tolerance=0.05,
-                                                          offset_ratio=None))
+        pairs = mir_eval.transcription.match_notes(ri, rp, ei, ep, onset_tolerance=0.05, offset_ratio=None)
+        matched = len(pairs); m_ref = {i for i, _ in pairs}
         # Katman 3.10 kontrolü: 100 ms toleransla (zamanlama hatası mı, perde hatası mı?)
         matched100 = len(mir_eval.transcription.match_notes(ri, rp, ei, ep, onset_tolerance=0.10,
                                                              offset_ratio=None))
     else:
         matched = matched100 = 0
+
+    # Katman 3.11 Adım 1b: hızlı aynı perde tekrarları (önceki nota <= 3 kare önce bitti, IOI < 200 ms)
+    rep = {"<100": [0, 0], "100-200": [0, 0]}
+    prev_e, prev_a = {}, {}
+    for i, (a, b, p) in enumerate(ref):                # roll_to_notes: perde perde, zaman sırasında
+        if p in prev_e and a - prev_e[p] <= 3:
+            ioi = (a - prev_a[p]) / FRAME_RATE * 1000
+            if ioi < 200:
+                c = rep["<100" if ioi < 100 else "100-200"]
+                c[0] += 1; c[1] += i not in m_ref
+        prev_e[p] = b; prev_a[p] = a
 
     poly = {}
     k = frame.sum(1)
@@ -93,20 +105,27 @@ def track_scores(probs, ons, frame, onset, thr, onset_thr=None, dec=None, rise=N
             pf, ff = pred[mask], frame[mask]
             poly[name] = (int((pf & ff).sum()), int((pf & ~ff).sum()), int((~pf & ff).sum()))
     return {"frame": (tp, fp, fn), "note": (matched, len(est), len(ref)),
-            "note100": (matched100, len(est), len(ref)), "poly": poly}
+            "note100": (matched100, len(est), len(ref)), "poly": poly, "rep": rep}
 
 
 def aggregate(results):
     F = np.zeros(3); N = np.zeros(3); N100 = np.zeros(3); poly = {}
+    rep = {"<100": np.zeros(2), "100-200": np.zeros(2)}
     for r in results:
         F += r["frame"]; N += r["note"]; N100 += r["note100"]
+        for g, v in r.get("rep", {}).items():
+            rep[g] += v
         for g, v in r["poly"].items():
             poly[g] = poly.get(g, np.zeros(3)) + v
     def nprf(m, ne, nr):
         p, r = m / max(ne, 1), m / max(nr, 1)
         return (p, r, 2 * p * r / max(p + r, 1e-9))
     return {"frame": prf(*F), "note": nprf(*N), "note100": nprf(*N100),
-            "poly": {g: prf(*v) for g, v in poly.items()}}
+            "poly": {g: prf(*v) for g, v in poly.items()},
+            # hızlı tekrar kaçma oranı: (n, kaçma oranı) — Katman 3.11 Adım 1b
+            "rep": {g: (int(v[0]), v[1] / max(v[0], 1)) for g, v in rep.items()},
+            "rep_fast": (int(sum(v[0] for v in rep.values())),
+                         sum(v[1] for v in rep.values()) / max(sum(v[0] for v in rep.values()), 1))}
 
 
 def load_split(split, model, ck, kind, device, limit=None):
@@ -204,7 +223,34 @@ def calibrate_peaks(data, best_on, criterion="note"):
     return best_on
 
 
-def calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True):
+# Katman 3.11 Adım 1b: yerel tepe seçiliyken tekrar kapılarının ORTAK araması
+REP_GRID = [dict(refractory=r, reattack=ra, rise_keep=rk, re_valley=rv)
+            for r in (0, 3, 6) for ra in (0.0, 0.3) for rk in (0.0, 6.0) for rv in (0.0, 0.15, 0.25)]
+
+
+def calibrate_repeats(data, best_on, criterion="note", tol=0.01):
+    """
+    Katman 3.11 Adım 1b — yalnız yerel tepe (peak_pick) seçildiyse:
+      REP_GRID'in tüm adayları (+ mevcut seçim) doğrulamada değerlendirilir; doğrulama skoru en iyinin en çok
+      'tol' altında kalan adaylar arasından doğrulamadaki HIZLI TEKRAR (IOI < 200 ms) kaçma oranı en düşük olan
+      seçilir (eşitlikte skor). tol=0 -> yalnız skor (saf arama). Test setine bakılmaz.
+    -> (skor, eşik, onset eşiği, dec, doğrulama tekrar kaçma oranı)
+    """
+    f0, t0, o0, d0 = best_on
+    if not d0.get("peak_pick"):
+        return best_on
+    cands = []
+    for g in [{}] + REP_GRID:
+        dec = dict(d0, **g)
+        r = evaluate_split(data, thresholds=[t0], onset_thr=o0, dec=dec)[t0]
+        cands.append((score(r, criterion), r["rep_fast"][1], dec))
+    top = max(c[0] for c in cands)
+    elig = [c for c in cands if c[0] >= top - tol - 1e-9]
+    s, miss, dec = min(elig, key=lambda c: (c[1], -c[0]))
+    return (s, t0, o0, dec)
+
+
+def calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True, rep_search=True, rep_tol=0.01):
     """
     Doğrulama verisinde seçim (test setine hiç bakılmaz):
       1) çözümleme yöntemi (kare-eşik / onset@eşik) + perde eşiği
@@ -267,6 +313,8 @@ def calibrate(data, on_grid, dec_grid=None, criterion="note", peak_search=True):
                     best_on = (score(sel[t0], criterion), t0, o0, dec)
         if peak_search:                            # Katman 3.11 Adım 1
             best_on = calibrate_peaks(data, best_on, criterion)
+            if rep_search:                         # Katman 3.11 Adım 1b
+                best_on = calibrate_repeats(data, best_on, criterion, rep_tol)
         if best_on[0] > best[0]:
             best = best_on
     return best

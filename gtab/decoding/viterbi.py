@@ -270,7 +270,7 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                         min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
                         peak=False, reattack=0.0, rise=None, rise_keep=0.0, rise_split=0.0,
                         offset_mat=None, offset_threshold=0.0,
-                        peak_pick=False, min_dist=2, prominence=0.1):
+                        peak_pick=False, min_dist=2, prominence=0.1, re_valley=0.0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -305,6 +305,9 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                          inmeyen vadiyle ayrılan hızlı tekrarlar iki nota olur. 'peak' yok sayılır;
                          yeniden vuruş / enerji kabul süzgeçleri tepe değeriyle aynen uygulanır;
                          rise_split'in sabit 3 kare koşulu min_dist olur.
+      - re_valley  > 0 (Katman 3.11 Adım 1b, yalnız peak_pick): nota sürerken gelen tepe, önceki tepeyle
+                         arasındaki vadi (alçak tepe - vadi dibi) >= re_valley ise yeni nota (yeniden vuruş
+                         ve enerji kabul kapılarına VEYA ile eklenir) -> gömülü hızlı tekrarlar.
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -332,11 +335,15 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                 k_ = s_ + int(np.argmax(onset_mat[s_:e_, p])) if peak else s_
                 adj.append(k_); pkv[k_] = float(onset_mat[s_:e_, p].max())
             st = adj
-        if pkv is not None and (reattack > 0 or keep_r > 0):   # nota sürerken zayıf yeniden vuruşu yok say
+        use_valley = peak_pick and re_valley > 0
+        if pkv is not None and (reattack > 0 or keep_r > 0 or use_valley):   # nota sürerken zayıf yeniden vuruşu yok say
+            x_ = onset_mat[:, p]
+            vdepth = lambda i_: min(x_[st[i_ - 1]], x_[st[i_]]) - float(x_[st[i_ - 1]:st[i_] + 1].min())
             st = [s_ for i_, s_ in enumerate(st)
                   if i_ == 0 or s_ == 0 or not cont[s_ - 1, p]
                   or (reattack > 0 and pkv[s_] >= reattack)
-                  or (keep_r > 0 and rmax(s_) >= keep_r)]
+                  or (keep_r > 0 and rmax(s_) >= keep_r)
+                  or (use_valley and vdepth(i_) >= re_valley)]
         if refractory > 0 and len(st) > 1:
             kept = [st[0]]
             for s_ in st[1:]:

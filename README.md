@@ -123,7 +123,10 @@ Eski düz yapıdan yeni yollara geçiş (devlog'lardaki eski komutlar için):
 ## Kurulum
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scriptsctivate          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt  # torch CUDA 12.1 derlemesi + numpy<2 (sürümler sabit)
+python -c "import torch; print(torch.cuda.is_available())"   # GPU kontrolü: True olmalı
 ```
 
 Tüm komutlar **proje kökünden** `python -m` ile çalıştırılır (kurulum gerekmez).
@@ -210,7 +213,9 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
       (bkz. [docs/devlog/README11.md](docs/devlog/README11.md)) — fingerstyle (GAPS) ölçütü sağlandı,
       tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik, kapanış kararı bekleniyor
 - [ ] Katman 3.11 — Hızlı tekrarlar (tremolo): yerel tepe çözümlemesi + noisy-OR, gerekirse vadi
-      eğitimi ve perde-onset kafası (bkz. [docs/devlog/README12.md](docs/devlog/README12.md))
+      eğitimi ve perde-onset kafası (bkz. [docs/devlog/README12.md](docs/devlog/README12.md)) — çözümleme
+      (yerel tepe + noisy-OR + tekrar kapıları) GAPS nota F1 0.689 → 0.733, akor tekrar kaçma <100 ms
+      %72 → %23, tab F1 0.760; GAPS hızlı tekrarları için sırada vadi eğitimi (Adım 4)
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

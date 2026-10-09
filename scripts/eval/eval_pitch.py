@@ -35,7 +35,7 @@ from gtab.utils import get_device
 
 # ----------------------------------------------------------------- ana akış
 def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_search=True, criterion="note",
-         force_rise=None, peak_search=True):
+         force_rise=None, peak_search=True, rep_search=True, rep_tol=0.01):
     device = get_device()
     model, ck, kind = load_model(kind, device, ckpt)
     has_on = hasattr(model, "onset_head")
@@ -53,7 +53,7 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
     def get_cal(sp):
         if sp not in cal:
             cal[sp] = calibrate(load_split(sp, model, ck, kind, device, limit), on_grid,
-                                DEC_GRID if dec_search else None, criterion, peak_search)
+                                DEC_GRID if dec_search else None, criterion, peak_search, rep_search, rep_tol)
             f1, t, o, dec = cal[sp]
             print(f"  [{sp}] secim: perde esigi={t}, cozumleme="
                   f"{'kare-esik' if o is None else f'onset@{o}'}"
@@ -62,7 +62,8 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
                      f", enerji_kabul={dec.get('rise_keep', 0.0)}, enerji_bol={dec.get('rise_split', 0.0)}"
                      f", offset={dec.get('offset_threshold', 0.0)}, birlestirme={dec.get('combine', 'max')}"
                      f", yerel_tepe={dec.get('peak_pick', False)}"
-                     + (f" (vadi={dec['prominence']}, ara={dec['min_dist']})" if dec.get('peak_pick') else "")
+                     + (f" (vadi={dec['prominence']}, ara={dec['min_dist']}, vadi_kaniti={dec.get('re_valley', 0.0)})"
+                        if dec.get('peak_pick') else "")
                      if o is not None else "") + f" (dogrulama skoru {f1:.3f})")
         return cal[sp]
 
@@ -88,13 +89,15 @@ def main(kind, ckpt, splits, select_split, limit=None, onset_thr=None, dec_searc
         summary.append((split, sp, thr, ot, r))
 
     print("\n" + "=" * 92)
-    print(f"{'split':<12}{'secim':<10}{'cozumleme':<14}{'esik':>5}{'nota F1':>10}{'@100ms':>8}{'kare F1':>10}   polifoni 1 / 2 / 3 / 4+")
+    print(f"{'split':<12}{'secim':<10}{'cozumleme':<14}{'esik':>5}{'nota F1':>10}{'@100ms':>8}{'kare F1':>10}   polifoni 1 / 2 / 3 / 4+"
+          f"   tekrar kacma <100 / 100-200 ms")
     print("-" * 100)
     for split, sp, thr, ot, r in summary:
         pol = " / ".join(f"{r['poly'][g][2]:.2f}" if g in r["poly"] else "  - "
                          for g in ("1", "2", "3", "4+"))
         dec = "kare-esik" if ot is None else f"onset@{ot}"
-        print(f"{split:<12}{sp:<10}{dec:<14}{thr:>5}{r['note'][2]:>10.3f}{r['note100'][2]:>8.3f}{r['frame'][2]:>10.3f}   {pol}")
+        print(f"{split:<12}{sp:<10}{dec:<14}{thr:>5}{r['note'][2]:>10.3f}{r['note100'][2]:>8.3f}{r['frame'][2]:>10.3f}   {pol}"
+              f"   {100 * r['rep']['<100'][1]:5.1f}% / {100 * r['rep']['100-200'][1]:5.1f}%  (n={r['rep']['<100'][0]}/{r['rep']['100-200'][0]})")
     print("=" * 100)
     print("@100ms = ayni secimle 100 ms onset toleransinda nota F1 (fark buyukse hata zamanlamada).")
     print("Esikler ve cozumleme yontemi yalnizca dogrulama split'lerinde secildi; test setlerine bakilmadi.")
@@ -119,6 +122,10 @@ if __name__ == "__main__":
                     help="esik secim olcutu: note = nota F1 (3.9); mix = (nota F1 + kare F1)/2")
     ap.add_argument("--no-peak-search", action="store_true",
                     help="Katman 3.11 aramasini (noisy-OR, yerel tepe) yapma; 3.10 secimi birebir")
+    ap.add_argument("--no-rep-search", action="store_true",
+                    help="Katman 3.11 Adim 1b (tekrar kapilarinin ortak aramasi) yapma; Adim 1 secimi birebir")
+    ap.add_argument("--rep-tol", type=float, default=0.01,
+                    help="Adim 1b: dogrulama skorundan bu kadar feda edilerek tekrar kacma orani en dusuk aday secilir")
     a = ap.parse_args()
     main(a.model, a.ckpt, a.splits, a.select_split, a.limit, a.onset_thr, not a.no_dec_search, a.criterion,
-         a.force_rise, not a.no_peak_search)
+         a.force_rise, not a.no_peak_search, not a.no_rep_search, a.rep_tol)

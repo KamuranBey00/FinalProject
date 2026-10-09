@@ -365,6 +365,87 @@ Sorun: yerel tepe seçicinin bulduğu tekrar adayları eski koşu-tabanlı kapı
 Kabul: §5 Adım 1–2 kuralı (<100 ms ≤ %55, 100–200 ms ≤ %40, GAPS nota ≥ 0.726, GS tab F1 ≥ 0.750).
 Tutmazsa → Adım 4 (vadi hedefli eğitim).
 
+## 8c. Adım 1b — vadi kanıtlı tekrar kapıları (9 Ekim 2026, kodlandı)
+
+Kod:
+- `segment_notes_onset(re_valley=...)` (yalnız `peak_pick`): nota sürerken gelen tepe, önceki tepeyle arasındaki
+  vadi derinliği (alçak tepe − vadi dibi) ≥ `re_valley` ise yeni nota. Yeniden vuruş ve enerji kabul kapılarına
+  **VEYA** ile eklenir; 0 = kapalı (Adım 1 birebir).
+- `track_scores` / `aggregate`: hızlı tekrar sayımı (önceki aynı perde notası ≤ 3 kare önce bitti; IOI <100 ve
+  100–200 ms) → `rep`, `rep_fast` (diagnose_pitch bölüm E ile aynı tanım).
+- `calibrate_repeats` (Adım 1'den sonra, yalnız yerel tepe seçildiyse): `REP_GRID` = refrakter {0, 3, 6} ×
+  yeniden_vuruş {0, 0.3} × enerji_kabul {0, 6} × re_valley {0, 0.15, 0.25} (36 aday + mevcut seçim) **birlikte**
+  aranır. Doğrulama skoru en iyinin en çok `--rep-tol` (0.01) altında kalan adaylar arasından doğrulamadaki
+  hızlı tekrar (IOI < 200 ms) kaçma oranı en düşük olan seçilir. Test setine bakılmaz; değerlendirme kuralı değişmez.
+  `--no-rep-search` = Adım 1 seçimi birebir; `--rep-tol 0` = saf skorla ortak arama.
+- `eval_pitch` özet tablosunda test setleri için **tekrar kaçma <100 / 100–200 ms** sütunu; seçim satırında
+  `vadi_kaniti`. `eval_hmm --re-valley`. `diagnose_pitch --no-rep-search --rep-tol`.
+
+Testler:
+- 70 ms senaryosu, Adım 1 GAPS kapıları (yeniden_vuruş 0, enerji 6) + gömülü tekrar (enerji yok): vadi kanıtı yokken
+  1 nota; **re_valley 0.25 → 2 nota** ✓; re_valley 0.6 → 1 nota ✓; peak_pick kapalıyken etkisiz ✓.
+- Tekrar sayımı = diagnose_pitch bölüm E (gaps_val 3 kayıt: <100 ms n=3 %66.7, 100–200 ms n=11 %36.4) ✓.
+- `calibrate_repeats` duman (gaps_val 3 kayıt, Adım 1 GAPS seçimi): skor 0.684 → 0.680 (tol içinde), hızlı tekrar
+  kaçma %42.9 → %35.7 (refrakter 6 → 3); tol=0 → Adım 1 seçimi korunuyor ✓. (Örnek küçük: 14 tekrar.)
+- Regresyon: `eval_pitch --limit 2` (yerel tepe seçilmeyen durum) önceki duman ile birebir (0.666/0.668, 0.893/0.854) ✓.
+
+### Çalıştırma (Adım 1b)
+```bash
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_rep_off.pt --splits gaps_test val val_comp --criterion mix
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_rep_off.pt --splits gaps_val val_comp --criterion mix
+# tab F1: [val] secim satırındaki değerlerle
+python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_rep_off.pt --onset-thr <..> --off-ratio <..> --refractory <..> --fallback <..> [--peak] --reattack <..> --rise-keep <..> --rise-split <..> --offset-thr <..> --combine <..> --peak-pick --prominence <..> --min-dist <..> --re-valley <..>
+```
+İsteğe bağlı ablasyon (tekrar odaklı seçimin katkısı): aynı eval_pitch komutuna `--rep-tol 0`.
+
+Kabul (§5 Adım 1–2): GAPS <100 ms kaçma ≤ %55, 100–200 ms ≤ %40, GAPS nota F1 ≥ 0.726 (Adım 1: 0.736 − 0.01),
+GS tab F1 ≥ 0.750. Tutmazsa → Adım 4 (vadi hedefli eğitim).
+
+## 8d. Adım 1b — sonuçlar (9 Ekim 2026)
+(Kullanıcı koşusu `cihaz: cpu` — eski .venv; sayılar cihazdan bağımsız. .venv'e CUDA torch kuruldu.)
+
+Seçim: gaps_val → refrakter **0**, yeniden_vuruş 0, enerji_kabul 6, **vadi_kanıtı 0 (seçilmedi)**, yerel tepe (0.1 / 2);
+val → refrakter **0**, yeniden_vuruş **0.3**, enerji_kabul **0**, vadi_kanıtı 0, yerel tepe (0.05 / 3).
+
+| nota / kare F1 | 3.10 | Adım 1 | **Adım 1b** |
+|---|---|---|---|
+| gaps_test | 0.689 / 0.675 | 0.736 / 0.676 | 0.733 / 0.676 |
+| GS val | 0.915 / 0.871 | 0.922 / 0.873 | 0.908 / 0.874 |
+| val_comp | 0.769 / 0.817 | 0.768 / 0.822 | 0.766 / 0.822 (P 0.699, R 0.845) |
+
+| hızlı tekrar kaçma <100 / 100–200 ms | 3.10 | Adım 1 | **Adım 1b** |
+|---|---|---|---|
+| gaps_val (diagnose) | 75.0 / 55.1 | 78.5 / 64.1 | 72.6 / 62.9 |
+| gaps_test (yeni sütun) | — | — | 76.2 / 43.8 |
+| val_comp | 72.5 / 32.5 | 85.0 / 59.3 | **22.5 / 17.7** |
+
+Doğrulama (gaps_val 5 kayıt, GAPS seçimi + re_valley):
+| re_valley | skor | nota P | nota F1 | tekrar kaçma <100 / 100–200 |
+|---|---|---|---|---|
+| 0 (seçilen) | 0.699 | 0.760 | 0.727 | 66.7 / 57.7 |
+| 0.15 | 0.651 | 0.558 | 0.629 | 55.6 / 42.0 |
+| 0.25 | 0.674 | 0.647 | 0.677 | 55.6 / 51.8 |
+| 0.35 | 0.688 | 0.706 | 0.704 | 66.7 / 54.4 |
+
+Yorum:
+- **GAPS (fingerstyle):** vadi kanıtı tekrarları yakalıyor (100–200 ms −16 puan) ama precision çöküyor (0.76 → 0.56):
+  modelin onset eğrisinde **sahte bölünmelerin (fragman) vadisi gerçek tekrarın vadisine benziyor**. Çözümleme
+  ikisini ayıramıyor → tol (0.01) içinde kalan aday yok, GAPS tekrarları neredeyse değişmedi. Eğitimsiz yol GAPS
+  için tükendi.
+- **GuitarSet akor:** tekrar kaçma büyük ölçüde düştü (<100 ms 72.5 → 22.5, 100–200 ms 32.5 → 17.7; kapı
+  gevşedi, refrakter 0, enerji kapısı kalktı) ama akor hayaletleri arttı (P 0.834 → 0.699, fragman 1225 → 1507);
+  nota F1 değişmedi. GS val nota F1 −0.014 (0.922 → 0.908; tol mix skorunda −0.006).
+- Kabul (§5): GAPS nota ≥ 0.726 ✓ (0.733); GAPS <100 ms ≤ %55 ✗, 100–200 ms ≤ %40 ✗; GS tab F1 bekleniyor.
+
+**GS solo tab F1 (val seçimiyle, refrakter 0, yeniden_vuruş 0.3, enerji 0):** greedy **0.760**, Viterbi 0.760
+(P 0.747 / R 0.774) — Adım 1 ve 3.10 ile aynı → ≥ 0.750 ✓. Kare düzeyinde tel ataması etkilenmedi; GS val nota F1
+düşüşü (−0.014) tab F1'e yansımadı. **Karar: 1b seçimi kabul** (akor tekrarlarında büyük kazanç, tab F1 nötr;
+GAPS seçimi Adım 1 ile fiilen aynı).
+
+**Karar dalı → Adım 4 (eğitim).** Gerekçe ölçüldü: sorun artık çözümleme kapıları değil, modelin gerçek tekrarı
+sahte bölünmeden ayıran bir onset vadisi vermemesi. Adım 4.1 (iki yakın aynı perde onset'i arasına "onset yok"
+hedefi + fragman yerlerinde negatif) tam bunu öğretir.
+
 ## 8. Durum
 - [x] Kod okuma teşhisi (1a, 1b)
 - [x] Sentetik duman testi (3 seed): çözümleme tavanı doğrulandı, yerel tepe + noisy-OR <100 ms yakalamayı ~2.4×, 100–200 ms'yi ~3× artırdı
@@ -373,7 +454,10 @@ Tutmazsa → Adım 4 (vadi hedefli eğitim).
 - [x] Adım 1 — yerel tepe seçici + noisy-OR + kalibrasyon: kod + testler + regresyon
 - [x] Adım 1 — ölçüm: GAPS nota 0.689 → 0.736 (precision), tekrarlar kötüleşti (kapılar)
 - [x] Adım 1 — GS tab F1 (eval_hmm): 0.760 / 0.760 (nötr) → Adım 1 çözümlemesi GAPS için kabul
-- [ ] Adım 1b — yerel tepe için tekrar kapılarının ortak araması ← **KALDIĞIMIZ YER (kullanıcı onayı bekleniyor)**
+- [x] Adım 1b — vadi kanıtı + ortak arama + tekrar odaklı seçim: kod + testler + regresyon
+- [x] Adım 1b — ölçüm: GAPS tekrarları değişmedi (vadi kanıtı precision'ı çökertiyor), akor tekrarları büyük düşüş
+- [x] Adım 1b — GS tab F1 0.760 (nötr) → 1b seçimi kabul
+- [ ] Adım 4 — eğitim (vadi hedefi) ← **KALDIĞIMIZ YER: kullanıcı onayı**
 - [x] Adım 2 — `cqt_decay`, `hf_flux` ölçüm satırları: kod
 - [x] Adım 2 — AUC ölçümü: GAPS'te mevcut CQT'nin altında → çözümlemeye alınmadı
 - [ ] Adım 3 — strum gruplama; seçim parçası kararı (kullanıcı)
