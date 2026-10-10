@@ -197,6 +197,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README11.md](docs/devlog/README11.md) — Katman 3.10 (polifonide perde: hayalet notalar ve kaçan perdeler)
 - [docs/devlog/README12.md](docs/devlog/README12.md) — Katman 3.11 (hızlı tekrarlar: yerel tepe çözümlemesi, noisy-OR, perde-onset)
 - [docs/devlog/README13.md](docs/devlog/README13.md) — Katman 3.12 (akustik katman: kapasite mi veri mi; derin CNN / SynthTab ön-eğitimi)
+- [docs/devlog/README14.md](docs/devlog/README14.md) — Katman 3.13 (GAPS partisyonundan tel etiketi + parmak numarası; README9 3.8e)
 
 ## Yol haritası
 
@@ -219,6 +220,10 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [x] Katman 3.12 — Akustik katman: kapasite ölçümü → derin CNN (artık bloklar) + perde-onset kafası
       (bkz. [docs/devlog/README13.md](docs/devlog/README13.md)) — **`tabcrnn_deep2.pt`**: GAPS nota F1
       0.720 → **0.779**, tab F1 **0.777**, val_comp 0.807; kapasite farkı 0.004 → SynthTab (3b) gerekmedi
+- [ ] Katman 3.13 — GAPS partisyon TAB'ı → klasik gitarda tel etiketi + parmak numarası (README9 3.8e;
+      bkz. [docs/devlog/README14.md](docs/devlog/README14.md)) — 165 kayıt etiketlendi; TAB ile ses eğitimi
+      genellenmedi; **"klasik edisyon önerisi"** (sembolik konum + sol el parmağı, iki yönlü dizi modeli):
+      gaps_test tel 0.815 (naif 0.745), parmak 0.636 (taban 0.566); ses modu GuitarSet 0.878 korunuyor
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile

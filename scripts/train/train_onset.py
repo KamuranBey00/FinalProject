@@ -45,7 +45,7 @@ import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from gtab.core.instrument import STANDARD_6
-from gtab.data.gaps import gaps_files
+from gtab.data.gaps import GAPS_TAB_DIR, gaps_files
 from gtab.data.tab_labels import n_tab_classes, fragment_frames
 from gtab.decoding.viterbi import pitch_onset_matrix
 from gtab.data.torch_dataset import GuitarSetSeq, PitchSeq
@@ -82,7 +82,7 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
     """
     model.eval()
     has_pon = getattr(model, "pitch_onset_head", None) is not None
-    t = dict(tab=[0, 0, 0], gf=[0, 0, 0])
+    t = dict(tab=[0, 0, 0], gf=[0, 0, 0], gtab=[0, 0, 0])
     t.update({(k, h): [0, 0, 0] for k in ("on", "go", "pon", "gpo") for h in ONSET_THRS})
     with torch.no_grad():
         for x, y, on, _, _, L in gs_val:
@@ -103,8 +103,13 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
             for h in ONSET_THRS:
                 _acc(t, ("on", h), po > h, go)
         if gp_val is not None:
-            for x, f, on, _, L in gp_val:
+            for x, f, on, _, L, *yt in gp_val:
                 tab, ol, _, pl = model.forward_full(x.to(device))
+                if yt:                                 # Katman 3.13: partisyon TAB'ı (bilinen kareler)
+                    vt = yt[0][:, :, 0] != PAD
+                    p, g = tab.argmax(-1).cpu()[vt], yt[0][vt]
+                    ap, ag = p > 0, g > 0; tp = int(((p == g) & ap).sum())
+                    t["gtab"][0] += tp; t["gtab"][1] += int(ap.sum()) - tp; t["gtab"][2] += int(ag.sum()) - tp
                 pf = pitch_probs(tab, idx).cpu() > thr
                 pon = pitch_onset_probs(tab, ol, idx).cpu()
                 mask = torch.arange(f.shape[1])[None, :] < L[:, None]
@@ -116,6 +121,8 @@ def evaluate(model, gs_val, gp_val, idx, device, thr=0.5):
                     for h in ONSET_THRS:
                         _acc(t, ("gpo", h), pp_ > h, on[mask] > 0.5)
     out, best_thr = {"tab": _f(*t["tab"])}, {}
+    if sum(t["gtab"]):
+        out["gtab"] = _f(*t["gtab"])
     keys = ("on", "gf", "go") if gp_val is not None else ("on",)
     if has_pon:
         keys += ("pon", "gpo") if gp_val is not None else ("pon",)
@@ -154,7 +161,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           onset_weight=1.0, pitch_weight=1.0, ckpt="tabcrnn_onset.pt", seed=1, pos_weight=3.0,
           harmonics=None, onset_soft=None, gs_pitch_weight=0.0, short_frames=0, short_weight=1.0,
           repeat_weight=1.0, repeat_gap=3, offset_weight=0.0, valley_weight=1.0, frag_weight=1.0, oversample=1.0, deep=0,
-          pitch_onset_weight=0.0, new_lr_mult=1.0):
+          pitch_onset_weight=0.0, new_lr_mult=1.0, gaps_tab_weight=0.0):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
@@ -186,12 +193,16 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         tr_f, va_f = [], []
         for sp in pitch_splits:
             a, b = gaps_files(sp); tr_f += a; va_f += b
+        td = GAPS_TAB_DIR if gaps_tab_weight > 0 else None    # Katman 3.13: partisyon TAB'ı
         p_tr = make_loader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft,
                                     repeat_weight=repeat_weight, repeat_gap=repeat_gap,
-                                    valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gaps_frag),
+                                    valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gaps_frag,
+                                    tab_dir=td),
                            batch_size, oversample)
-        gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft), batch_size=batch_size)
-        print(f"perde: {len(tr_f)} train / {len(va_f)} val kaydi (icraciya gore ayrik)")
+        gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft, tab_dir=td),
+                            batch_size=batch_size)
+        print(f"perde: {len(tr_f)} train / {len(va_f)} val kaydi (icraciya gore ayrik)"
+              + (f" | partisyon TAB kaybi x{gaps_tab_weight} ({td})" if td else ""))
 
     use_off = offset_weight > 0 or bool(init_ck and init_ck.get("offset"))
     deep = max(deep, int(init_ck.get("deep") or 0) if init_ck else 0)
@@ -236,11 +247,13 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
               " ".join(f"{n} {m[k]:.3f}" + (f"@{bt[k]}" if k in bt else "")
                        for k, n in (("tab", "GS-tabF1"), ("on", "GS-onsetF1"), ("pon", "GS-perdeOnsetF1(kafa)"),
                                     ("gf", "GAPS-kareF1"), ("go", "GAPS-onsetF1(tel)"),
-                                    ("gpo", "GAPS-onsetF1(kafa)")) if k in m))
+                                    ("gpo", "GAPS-onsetF1(kafa)"), ("gtab", "GAPS-tabF1(partisyon)")) if k in m))
         # seçim skoru: eski 4 ölçü; GAPS onset'te iki yoldan iyisi (kafa yoksa eskisiyle birebir)
         sel = {k: m[k] for k in ("tab", "on", "gf", "go") if k in m}
         if "gpo" in m:
             sel["go"] = max(m["go"], m["gpo"])
+        if "gtab" in m:                                # Katman 3.13: GAPS tel ölçüsü de seçime girer
+            sel["gtab"] = m["gtab"]
         return sum(sel.values()) / len(sel)
 
     best = score(0, {}); state["thr"] = state["cur_thr"]; save()
@@ -280,9 +293,10 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                 sums["gsperde"] += l_gp.item()
             if p_iter is not None:
                 try:
-                    xg, fg, og, owg, Lg = next(p_iter)
+                    bg = next(p_iter)
                 except StopIteration:
-                    p_iter = iter(p_tr); xg, fg, og, owg, Lg = next(p_iter)
+                    p_iter = iter(p_tr); bg = next(p_iter)
+                xg, fg, og, owg, Lg = bg[:5]
                 xg, fg, og, owg = xg.to(device), fg.to(device), og.to(device), owg.to(device)
                 tg, olg, offg, plg = model.forward_full(xg)
                 mask = (torch.arange(fg.shape[1], device=device)[None, :] < Lg.to(device)[:, None]).float()
@@ -292,6 +306,12 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                 l_po = ((bce(po, og) * owg).mean(-1) * mask).sum() / mask.sum()
                 loss = loss + pitch_weight * (l_p + onset_weight * l_po)
                 sums["perde"] += l_p.item(); sums["ponset"] += l_po.item()
+                if gaps_tab_weight > 0:                # Katman 3.13: partisyon TAB'ı, yalnız bilinen kareler
+                    yg = bg[5].to(device).reshape(-1); cwg = (w[yg.clamp(min=0)] * (yg != PAD)).sum()
+                    if cwg > 0:
+                        l_gt = ce(tg.reshape(-1, C), yg).sum() / cwg
+                        loss = loss + gaps_tab_weight * l_gt
+                        sums["gtab"] = sums.get("gtab", 0.0) + l_gt.item()
                 if pitch_onset_weight > 0:             # Katman 3.12: perde-onset kafası (GAPS, doğrudan)
                     l_gpon = ((bce_logit(plg, og) * owg).mean(-1) * mask).sum() / mask.sum()
                     loss = loss + pitch_weight * pitch_onset_weight * l_gpon
@@ -342,6 +362,8 @@ if __name__ == "__main__":
     ap.add_argument("--deep", type=int, default=0, help="CNN govdesine sifirla baslatilan artik blok sayisi")
     ap.add_argument("--pitch-onset-weight", type=float, default=0.0, help="dogrudan perde-onset kafasi kayip agirligi (0 = yok)")
     ap.add_argument("--new-lr-mult", type=float, default=1.0, help="init'te olmayan yeni katmanlarin lr carpani")
+    ap.add_argument("--gaps-tab-weight", type=float, default=0.0,
+                    help="Katman 3.13: GAPS partisyon TAB'i tel kaybi agirligi (0 = kapali; build_gaps_tab gerekir)")
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
@@ -352,4 +374,5 @@ if __name__ == "__main__":
           short_frames=a.short_frames, short_weight=a.short_weight,
           repeat_weight=a.repeat_weight, repeat_gap=a.repeat_gap, offset_weight=a.offset_weight,
           valley_weight=a.valley_weight, frag_weight=a.frag_weight, oversample=a.oversample,
-          deep=a.deep, pitch_onset_weight=a.pitch_onset_weight, new_lr_mult=a.new_lr_mult)
+          deep=a.deep, pitch_onset_weight=a.pitch_onset_weight, new_lr_mult=a.new_lr_mult,
+          gaps_tab_weight=a.gaps_tab_weight)

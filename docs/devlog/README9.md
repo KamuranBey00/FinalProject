@@ -168,4 +168,4 @@ Yorum:
 - [x] 3.8b alan farkı ölçümü
 - [x] 3.8c GAPS ince ayar → `tabcrnn_gaps.pt` kabul
 - [ ] 3.8d SynthTab (Dev Set ile hat doğrulaması → nylon alt küme)
-- [ ] 3.8e partisyon TAB'ı → tel etiketi
+- [ ] 3.8e partisyon TAB'ı → tel etiketi — Katman 3.13'te yapılıyor ([README14](README14.md))

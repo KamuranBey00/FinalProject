@@ -46,8 +46,22 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
 - **GÜNCEL TABAN (10 Ekim): `checkpoints/tabcrnn_deep2.pt`** + `tabcrnn_deep2.cal.json` (Katman 3.12 kapandı,
   dal `katman-3.12-akustik`). GS solo tab F1 **0.777 / 0.777**, oracle tel 0.878, GAPS test nota/kare **0.779 / 0.701**,
   GS val 0.924 / 0.879, val_comp 0.807 / 0.827; gaps_fit 0.784 ≈ gaps_val 0.780. Çözümleme perde-onset kafasından
-  (`--onset-source pitch`). Sırada **Katman 4** (kullanıcı talimatı bekleniyor). Açıklar: GAPS <100 ms tekrarlar,
-  "perde hiç aktif değil" kaçanlar (%36), akor fragmanları. Aşağıdaki maddeler geçmiş kayıttır.
+  (`--onset-source pitch`). Açıklar: GAPS <100 ms tekrarlar, "perde hiç aktif değil" kaçanlar (%36), akor fragmanları.
+- **Katman 3.13 sürüyor (10 Ekim, `docs/devlog/README14.md`; kullanıcı isteği, Katman 4'ten önce):** GAPS partisyon
+  TAB'ı + parmak numarası → tel etiketi (README9 3.8e). `gtab/data/gaps_score.py` (MusicXML + tekrar açma + syncpoint
+  + MIDI eşleme), `scripts/data/build_gaps_tab.py` → `data/cache/gaps_tab/` (165 kayıt, %81 nota etiketli, perde
+  uyumu %98.9, parmak bağlama %99.4), `scripts/eval/eval_gaps_tab.py` (GAPS oracle tel + bilinen karede tab F1).
+  deep2 GAPS oracle tel **0.610 < naif 0.702** (GuitarSet 0.878) → `train_onset --gaps-tab-weight 1` →
+  `tabcrnn_gtab.pt` → **kabul edilmedi** (seçim hiç ep 0'ı geçmedi → dosya = deep2; gaps_val tab F1 +0.004, GS tab
+  −0.035): partisyon TAB'ı icracıya genellenmiyor, ses kaybı olarak kullanma.
+  **Adım 2 (kullanıcı planı; sunum modül 4 + 7): "klasik edisyon önerisi" = sembolik konum + sol el parmağı.**
+  2a log-lineer (`gtab/decoding/edition.py`, `edition.npz`) yetmedi (parmak < taban). **2b iki yönlü dizi modeli
+  (`gtab/models/edition_net.py`, `train_edition_seq`, `edition_seq.pt`) KABUL:** gaps_test tel 0.815 (naif 0.745),
+  parmak 0.636 (taban 0.566), ses modu GuitarSet 0.878 değişmedi. Ürün iki mod: "duyulan konum" (ses) / "edisyon
+  önerisi"; **karıştırılmaz** (kullanıcı kararı; karışım koddan çıkarıldı). Ürün parmak (konum + parmak tam) 0.434 >
+  aynı konumda taban 0.376; uçtan uca (deep2 notaları, gaps_test) tel 0.802 bulunanlarda / 0.655 tüm etiketlilerde,
+  tam parmak 0.397 / 0.331 (nota bulma %81.7). Ölçüm: `python -m scripts.eval.eval_edition` (varsayılanlar).
+  Teknikler (Katman 4) sonra. Aşağıdaki maddeler geçmiş kayıttır.
 - **Eski taban: `checkpoints/tabcrnn_rep_off.pt`** (TabCRNNOnset + harmonik istifleme + offset kafası;
   tabcrnn_poly'den `train_onset --repeat-weight 3 --pitch-weight 2 --offset-weight 1`).
   GS solo tab F1 **0.760**, oracle tel 0.862, GAPS test nota/kare **0.689/0.675**, val_comp 0.769/0.817,

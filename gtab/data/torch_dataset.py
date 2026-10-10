@@ -268,12 +268,16 @@ class PitchSeq(Dataset):
     """
 
     def __init__(self, files, chunk=200, onsets=False, dilate=2, onset_soft=None,
-                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None):
+                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None, tab_dir=None):
         """onsets: True ise perde onset roll'u ve onset kaybı ağırlığı da verilir ->
         (x, frame, onset (L,P), onset ağırlığı (L,P), L). repeat_weight: Adım 3c tekrar ağırlığı.
         valley_weight / frag_weight / frag_fn(path, cqt, frame, onset) / self.fast: Katman 3.11 Adım 4
-        (GuitarSetSeq ile aynı)."""
+        (GuitarSetSeq ile aynı).
+        tab_dir (Katman 3.13): partisyon TAB etiketleri (build_gaps_tab) -> çıktıya (L, S) tel sınıfı eklenir;
+        bilinmeyen kareler ve etiketi olmayan kayıtlar PAD (kayıpta yok sayılır)."""
         from gtab.data.tab_labels import repeat_onset_weights, valley_frames
+        self.tab_dir = tab_dir
+        self.tabs = []
         self.items = []
         self.with_onsets = onsets
         self.onsets = []
@@ -306,6 +310,13 @@ class PitchSeq(Dataset):
             if onsets and valley_weight != 1.0:       # Adım 4: vadi = "vuruş yok"
                 on_all = on_all * ~valley
             T, nb = cqt.shape
+            if tab_dir is not None:
+                tab_all = np.full((T, 6), GuitarSetSeq.PAD, np.int64)
+                lf = os.path.join(tab_dir, os.path.basename(path))
+                if os.path.exists(lf):
+                    with np.load(lf) as d:
+                        n = min(T, len(d["tab"]))
+                        tab_all[:n] = np.where(d["known"][:n, None], d["tab"][:n], GuitarSetSeq.PAD)
             for s in range(0, T, chunk):
                 c, f = cqt[s:s + chunk], fr[s:s + chunk]
                 L = len(c)
@@ -313,6 +324,9 @@ class PitchSeq(Dataset):
                     c = np.vstack([c, np.zeros((chunk - L, nb), np.float16)])
                     f = np.vstack([f, np.zeros((chunk - L, f.shape[1]), np.uint8)])
                 self.items.append((c, f, L))
+                if tab_dir is not None:
+                    tb = np.full((chunk, 6), GuitarSetSeq.PAD, np.int64); tb[:L] = tab_all[s:s + chunk]
+                    self.tabs.append(tb)
                 if onsets:
                     o = np.zeros((chunk, fr.shape[1]), np.float16); o[:L] = on_all[s:s + chunk]
                     self.onsets.append(o)
@@ -329,6 +343,7 @@ class PitchSeq(Dataset):
         c, f, L = self.items[i]
         x, fr = torch.from_numpy(c.astype(np.float32)).unsqueeze(0), torch.from_numpy(f.astype(np.float32))
         if self.with_onsets:
-            return (x, fr, torch.from_numpy(self.onsets[i].astype(np.float32)),
-                    torch.from_numpy(self.on_weights[i].astype(np.float32)), L)
+            out = (x, fr, torch.from_numpy(self.onsets[i].astype(np.float32)),
+                   torch.from_numpy(self.on_weights[i].astype(np.float32)), L)
+            return out + (torch.from_numpy(self.tabs[i]),) if self.tab_dir is not None else out
         return x, fr, L

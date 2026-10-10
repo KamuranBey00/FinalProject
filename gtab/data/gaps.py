@@ -18,6 +18,7 @@ REPO = "xavriley/GAPS"
 GAPS_DIR = os.environ.get("GAPS_DATA_HOME", os.path.join(RAW_DIR, "gaps_hf"))
 META = "gaps_metadata_with_splits.csv"
 CACHE_META = os.path.join(CACHE_DIR, "gaps_meta.csv")
+GAPS_TAB_DIR = os.path.join(CACHE_DIR, "gaps_tab")     # Katman 3.13: partisyon TAB etiketleri (build_gaps_tab)
 
 
 def load_metadata(gaps_dir=GAPS_DIR) -> pd.DataFrame:
