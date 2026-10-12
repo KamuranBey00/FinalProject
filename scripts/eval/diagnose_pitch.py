@@ -402,7 +402,7 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_s
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="tabcrnn_onset_h.pt")
+    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
     ap.add_argument("--splits", nargs="+", default=["val_comp", "gaps_val"])
     ap.add_argument("--onset-thr", type=float, default=None, help="bos = dogrulamada sec; -1 = kare-esik")
     ap.add_argument("--no-dec-search", action="store_true", help="Katman 3.9 cozumlemesi (Adim 0 olcumu)")

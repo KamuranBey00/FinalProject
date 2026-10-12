@@ -11,19 +11,21 @@ Checkpoint'te "onset": True varsa 'crnn' türü otomatik olarak TabCRNNOnset kur
 (forward() yine tab döndürür -> eski değerlendirme kodu değişmeden çalışır).
 """
 
+import os
+
 import numpy as np
 import torch
 
 from gtab.core.instrument import STANDARD_6
 from gtab.data.torch_dataset import _window
 from gtab.models.nets import TabCNN, TabCRNN, TabCRNNOnset
-from gtab.paths import ckpt_path
+from gtab.paths import CKPT_DIR, ckpt_path
 
-DEFAULT_CKPT = {"cnn": "tabcnn.pt", "crnn": "tabcrnn.pt"}
+DEFAULT_CKPT = {"cnn": os.path.join(CKPT_DIR, "archive", "tabcnn.pt"), "crnn": "tabcrnn_deep2.pt"}   # güncel taban
 
 
 def load_model(kind, device, ckpt=None, instrument=STANDARD_6):
-    """ckpt=None -> checkpoints/tabcnn.pt ya da checkpoints/tabcrnn.pt."""
+    """ckpt=None -> crnn: checkpoints/tabcrnn_deep2.pt (güncel taban) | cnn: checkpoints/archive/tabcnn.pt."""
     path = ckpt_path(ckpt or DEFAULT_CKPT[kind])
     ck = torch.load(path, map_location=device)
     if kind == "crnn":

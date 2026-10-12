@@ -14,7 +14,7 @@ import os
 import numpy as np
 
 from gtab.data.gaps import GAPS_TAB_DIR, gaps_files
-from gtab.decoding.edition import ChordPositionModel, FingerModel, as_tuples, label_sequence, save_edition
+from archive.gtab.decoding.edition_loglinear import ChordPositionModel, FingerModel, as_tuples, label_sequence, save_edition
 from gtab.paths import ckpt_path
 
 

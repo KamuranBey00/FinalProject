@@ -27,7 +27,7 @@ import soundfile as sf
 
 from gtab.config import SAMPLE_RATE, FRAME_RATE
 from gtab.data.features import compute_cqt
-from gtab.data.synthtab import index, string_notes, notes_to_tab
+from archive.gtab.data.synthtab import index, string_notes, notes_to_tab
 from gtab.paths import CACHE_DIR
 
 

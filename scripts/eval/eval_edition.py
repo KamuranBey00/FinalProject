@@ -3,17 +3,18 @@ Katman 3.13 Adım 2 — "Klasik edisyon önerisi" ölçümü (konum + sol el par
 
 İki ayrı çıktı modu (karıştırılmaz): "duyulan konum" = ses (deep2, greedy) | "edisyon önerisi" = sembolik model.
 1) Tel uyumu, GERÇEK notalar (MIDI perdesi + zamanları), partisyonda etiketli notalar:
-   naif (en düşük perde) | GuitarSet önseli (transitions.npz) | edisyon log-lineer | edisyon dizi modeli | ses.
+   naif (en düşük perde) | GuitarSet önseli (transitions.npz) | edisyon dizi modeli | ses.
+   (Adım 2a log-lineer aday arşivde: archive/scripts/train/train_edition.py; sonuçları README14.)
    GuitarSet solo val (hex = fiziksel tel): ses 0.878 olmalı (= eval_hmm), edisyon ayrıca raporlanır.
 2) Parmak (parmak numaralı basılı notalar):
-   a) partisyon konumu verilerek: yalnız parmak (taban "perde − pozisyon + 1" | log-lineer | dizi)
+   a) partisyon konumu verilerek: yalnız parmak (taban "perde − pozisyon + 1" | dizi)
    b) ÜRÜN: konumu yöntem kendisi seçer, doğru = (tel, perde, parmak) üçü birden; taban da aynı konum üstünde
 3) UÇTAN UCA (gaps_test, bir kez): deep2'nin sesten bulduğu notalar (çözümleme gaps_val seçimi, --load-cal) ->
    konum/parmak yöntemleri -> partisyon etiketli notalarla eşleme (aynı perde, ±50 ms).
    Oranlar iki paydada: bulunan etiketli notalarda | tüm etiketli notalarda (ürün sayısı = nota kaçması dahil).
 
 Çalıştırma:
-    python -m scripts.eval.eval_edition --edition edition.npz --seq edition_seq.pt --ckpt tabcrnn_deep2.pt
+    python -m scripts.eval.eval_edition                  # varsayılanlar: edition_seq.pt, tabcrnn_deep2.pt
 """
 
 import argparse
@@ -28,7 +29,7 @@ from gtab.core.instrument import STANDARD_6
 from gtab.data.gaps import GAPS_TAB_DIR, gaps_files
 from gtab.data.gaps_score import match_notes
 from gtab.data.torch_dataset import _normalize
-from gtab.decoding.edition import decode, finger_baseline, label_sequence, load_edition, order_notes
+from gtab.decoding.edition import finger_baseline, label_sequence, order_notes
 from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice, notes_from_tab
 from gtab.decoding.viterbi import energy_rise, segment
 from gtab.evaluation.pitch_eval import load_selection
@@ -126,8 +127,7 @@ def with_baseline_finger(notes, positions):
     return [None if p is None or p[0] is None else (p[0], p[1], fg[i]) for i, p in enumerate(positions)]
 
 
-def main(edition, ckpt, seq, load_cal):
-    pos, fing = load_edition(ckpt_path(edition))
+def main(ckpt, seq, load_cal):
     tm = TransitionModel.load(ckpt_path("transitions.npz"), INSTR)
     device = get_device()
     model, _, _ = load_model("crnn", device, ckpt)
@@ -137,15 +137,9 @@ def main(edition, ckpt, seq, load_cal):
     data = {"gaps_val": gaps_tracks("gaps_val", model, device),
             "gaps_test": gaps_tracks("gaps_test", model, device, dec=(thr, ot, rules)),
             "GuitarSet val": gs_tracks(model, device)}
-    print(f"Edisyon: {edition} + {seq} | ses: {ckpt} | kayit: " + ", ".join(f"{k} {len(v)}" for k, v in data.items()))
+    print(f"Edisyon: {seq} | ses: {ckpt} | kayit: " + ", ".join(f"{k} {len(v)}" for k, v in data.items()))
 
     cache = {}
-
-    def ll(t, key="notes", chord="chord", fixed=None):
-        k = ("ll", id(t), key, fixed is not None)
-        if k not in cache:
-            cache[k] = decode(t[key], t[chord], pos, fing, fixed=fixed)
-        return cache[k]
 
     def sq(t, key="notes", chord="chord", fixed=None):
         k = ("sq", id(t), key, fixed is not None)
@@ -159,7 +153,7 @@ def main(edition, ckpt, seq, load_cal):
             ("GuitarSet onseli (ses yok)",
              lambda t: decode_lattice(build_lattice([(a, b, int(p)) for a, b, p in t["notes"]], None, tm,
                                                     time_unit="sec"), 0.0, 1.0)),
-            ("EDISYON log-lineer", ll), ("EDISYON dizi modeli  [mod: edisyon onerisi]", sq),
+            ("EDISYON dizi modeli  [mod: edisyon onerisi]", sq),
             ("ses / greedy         [mod: duyulan konum]", lambda t: greedy(t["em"]))]
     print("\n1) TEL UYUMU (gercek notalar; partisyonda etiketli notalar)")
     print(f"  {'yontem':<48}" + "".join(f"{k:>15}" for k in data))
@@ -173,20 +167,19 @@ def main(edition, ckpt, seq, load_cal):
     print("  " + "-" * 80)
     res = {}
     for sp in ("gaps_val", "gaps_test"):
-        c = dict(n=0, base=0, ll=0, sq=0, f_naive=0, f_base_sq=0, f_sq=0, f_ll=0)
+        c = dict(n=0, base=0, sq=0, f_naive=0, f_base_sq=0, f_sq=0)
         for t in data[sp]:
             gold = [g if l else None for g, l in zip(t["gold"], t["lab"])]
             base = finger_baseline(t["notes"], gold)
-            llf = ll(t, fixed=gold)
             sqf = sq(t, fixed=np.array([g[0] if g is not None else -1 for g in gold]))
             own_sq = sq(t)
             prod = {"f_naive": with_baseline_finger(t["notes"], naive(t["notes"])),
                     "f_base_sq": with_baseline_finger(t["notes"], [None if p is None else p[:2] for p in own_sq]),
-                    "f_sq": own_sq, "f_ll": ll(t)}
+                    "f_sq": own_sq}
             for i, (g, gf) in enumerate(zip(gold, t["finger"])):
                 if g is None or g[1] == 0 or gf < 1:
                     continue
-                c["n"] += 1; c["base"] += base[i] == gf; c["ll"] += llf[i][2] == gf
+                c["n"] += 1; c["base"] += base[i] == gf
                 c["sq"] += sqf[i] is not None and sqf[i][2] == gf
                 for k, pr in prod.items():
                     c[k] += pr[i] is not None and tuple(pr[i]) == (g[0], g[1], gf)
@@ -194,12 +187,10 @@ def main(edition, ckpt, seq, load_cal):
     pr = lambda name, k: print(f"  {name:<56}" + "".join(f"{res[sp][k] / max(res[sp]['n'], 1):>12.3f}" for sp in res))
     print("  a) partisyon konumu verilerek (yalniz parmak):")
     pr("     taban: parmak = perde - pozisyon + 1", "base")
-    pr("     EDISYON log-lineer", "ll")
     pr("     EDISYON dizi modeli", "sq")
     print("  b) URUN: konumu yontem secer, dogru = tel + perde + parmak:")
     pr("     naif konum + taban parmak (tamamen kural)", "f_naive")
     pr("     dizi modeli konumu + taban parmak", "f_base_sq")
-    pr("     EDISYON log-lineer (konum + parmak)", "f_ll")
     pr("     EDISYON dizi modeli (konum + parmak)", "f_sq")
     print(f"  {'(parmakli nota sayisi)':<56}" + "".join(f"{res[sp]['n']:>12d}" for sp in res))
 
@@ -246,9 +237,8 @@ def main(edition, ckpt, seq, load_cal):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--edition", default="edition.npz")
     ap.add_argument("--seq", default="edition_seq.pt")
     ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
     ap.add_argument("--load-cal", default="checkpoints/tabcrnn_deep2.cal.json")
     a = ap.parse_args()
-    main(a.edition, a.ckpt, a.seq, a.load_cal)
+    main(a.ckpt, a.seq, a.load_cal)

@@ -8,7 +8,7 @@ Yalnızca import edilir; çalıştırılan her şey scripts/ altındadır.
     gtab.utils           seed, cihaz
     gtab.core            instrument (akort, tel/perde), note_event (ortak nota şeması)
     gtab.data            features (CQT), labels/tab_labels (etiket), torch_dataset,
-                         guitarset / gaps / synthtab (veri seti okuyucuları)
+                         guitarset / gaps / gaps_score (veri seti okuyucuları; synthtab arşivde)
     gtab.models          nets (PitchCNN/TabCNN/TabCRNN), losses, inference
     gtab.decoding        decode (çözümleme + ASCII tab), viterbi, transitions
     gtab.evaluation      metrics

@@ -293,7 +293,7 @@ if __name__ == "__main__":
     ap.add_argument("--demo", default=None)
     ap.add_argument("--threshold", type=float, default=0.8)
     ap.add_argument("--w-transition", type=float, default=1.0)
-    ap.add_argument("--ckpt", default=None, help="model agirlik dosyasi (varsayilan: tabcnn.pt/tabcrnn.pt)")
+    ap.add_argument("--ckpt", default=None, help="model agirlik dosyasi (varsayilan: tabcrnn_deep2.pt)")
     ap.add_argument("--onset-thr", type=float, default=None, help="onset esigi (bos = checkpoint'teki); -1 = kare-esik cozumlemesi")
     ap.add_argument("--off-ratio", type=float, default=1.0, help="Katman 3.10 histerezis (eval_pitch'in sectigi deger)")
     ap.add_argument("--refractory", type=int, default=0, help="Katman 3.10 refrakter pencere (kare)")

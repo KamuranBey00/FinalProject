@@ -333,7 +333,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--init", default="tabcrnn_gaps.pt")
+    ap.add_argument("--init", default="tabcrnn_deep2.pt")
     ap.add_argument("--tab-splits", default="train,train_comp")
     ap.add_argument("--pitch-splits", default="gaps_train")
     ap.add_argument("--epochs", type=int, default=15)
