@@ -66,7 +66,7 @@ MaxPool2d(2) → Dropout(0.25)`. TabCRNN'de zaman ekseni korunur (sadece frekans
 ekseni havuzlanır), ardından `Linear → BiLSTM(hidden=128, 2 katman) → Linear`
 ile zamansal bağlam eklenir.
 
-**Eğitim** ([scripts/train/](scripts/train/): train_pitch, train_tab, train_crnn, train_domain)
+**Eğitim** (Katman 2–3.8 betikleri artık [archive/](archive/README.md) altında; aktif: train_onset, train_edition_seq)
 - Adam optimizer, cosine learning-rate decay, sabit seed (tekrarlanabilirlik)
 - Sınıf dengesizliği için ayarlanabilir class-weighting (`inv`/`sqrt`, cap'li)
 - **Sessizlik-marjı taraması** (`--sweep`): retrain gerektirmeden precision/recall
@@ -99,16 +99,27 @@ gtab/                       çekirdek kütüphane (yalnızca import edilir)
   config.py, paths.py       ses/CQT sabitleri, proje yolları
   core/                     instrument (akort, tel/perde), note_event (ortak nota şeması)
   data/                     features (CQT), labels, tab_labels, torch_dataset,
-                            guitarset / gaps / synthtab (veri seti okuyucuları)
-  models/                   nets (PitchCNN, TabCNN, TabCRNN), losses, inference
-  decoding/                 decode (çözümleme, ASCII tab), viterbi, transitions
-  evaluation/               metrics
-scripts/                    çalıştırılan dosyalar (python -m scripts.<klasör>.<ad>)
+                            guitarset / gaps / gaps_score (veri seti okuyucuları)
+  models/                   nets (TabCRNNOnset + eski ağlar), losses, inference, edition_net (edisyon önerisi),
+                            rhythm_net (bağlamlı kuantalayıcı), beat_net (öğrenilen vuruş + ölçü başı)
+  decoding/                 decode (ASCII tab), viterbi (nota bulma), transitions, edition (nota dizisi yardımcıları),
+                            rhythm (vuruş takibi, ölçü başı, kuantalama),
+                            beat_dbn (bar-pointer DBN)
+  evaluation/               metrics, pitch_eval (kalibrasyon + nota/kare F1), rhythm_metrics
+  render/                   score (ölçüler + nota değerleri), musicxml (nota + TAB portresi)
+  pipeline.py               uçtan uca: ses -> notalar -> tel/perde -> vuruşlar (yarı otomatik) -> ölçülü TAB
+scripts/                    AKTİF çalıştırılan dosyalar (python -m scripts.<klasör>.<ad>)
   data/                     get_guitarset, build_guitarset, build_tab_labels, build_comp,
-                            get_gaps, build_gaps, build_synthtab
-  train/                    train_pitch (K2), train_tab (K3), train_crnn (K3.5–3.7), train_domain (K3.8)
-  eval/                     sweep_threshold (K2), eval_viterbi (K3.6), eval_hmm (K3.6b), eval_pitch (K3.8)
-checkpoints/                *.pt model ağırlıkları + transitions.npz
+                            get_gaps, build_gaps, build_gaps_tab, build_rhythm, build_beat_feats
+  train/                    train_onset (ses modeli; güncel taban deep2), train_edition_seq (edisyon önerisi),
+                            train_rhythm_q (bağlamlı kuantalayıcı), train_beat (vuruş ağı)
+  eval/                     eval_pitch (nota/kare F1), diagnose_pitch, eval_hmm (GS tab F1), eval_edition,
+                            eval_rhythm (ritim: vuruş, ölçü başı, kuantalama), eval_score (MusicXML çıktısı)
+  app/                      transcribe (ses + BPM + ölçü -> .musicxml)
+checkpoints/                AKTİF: tabcrnn_deep2.pt (+ .cal.json), transitions.npz, edition_seq.pt, rhythm_q.pt, beat_net.pt
+  archive/                  eski / reddedilen modeller (Katman 2 – 3.13)
+archive/                    eski ve reddedilen kod (Katman 2–3.8 eğitimleri, tamamlanmış tanılamalar,
+                            SynthTab hattı, log-lineer edisyon) -- bkz. archive/README.md
 data/cache/                 önbellek (.npz): train, val, train_comp, val_comp, gaps_*, synthtab_*  -- git'e girmez
 data/raw/                   ham veri (GAPS, SynthTab zip'leri)                                  -- git'e girmez
 docs/devlog/                katman katman geliştirme günlüğü
@@ -141,23 +152,34 @@ python -m scripts.data.build_guitarset
 python -m scripts.data.build_tab_labels
 python -m scripts.data.build_comp                 # Katman 3.7: comp kayıtları
 
-# Katman 2 — perde modeli
-python -m scripts.train.train_pitch --epochs 15
-python -m scripts.eval.sweep_threshold
-
-# Katman 3 — TabCNN
-python -m scripts.train.train_tab --epochs 40
-python -m scripts.train.train_tab --sweep
-
-# Katman 3.5–3.7 — TabCRNN (+comp)
-python -m scripts.train.train_crnn --epochs 30 --splits train,train_comp --ckpt tabcrnn_comp.pt
-python -m scripts.eval.eval_hmm --model crnn --ckpt tabcrnn_comp.pt
-python -m scripts.train.train_crnn --demo data/cache/val/05_Rock1-130-A_solo.npz --ckpt tabcrnn_comp.pt --margin 0.8
-
-# Katman 3.8 — klasik gitar (ayrıntı: docs/devlog/README9.md)
 python -m scripts.data.get_gaps --splits train test
 python -m scripts.data.build_gaps --disjoint
-python -m scripts.eval.eval_pitch --ckpt tabcrnn_comp.pt --splits gaps_test val val_comp
+python -m scripts.data.build_gaps_tab             # Katman 3.13: partisyon TAB + parmak etiketleri
+
+# Güncel ses tabanı (deep2) — ölçüm (kalibrasyon dosyadan, dakikalar)
+python -m scripts.eval.eval_pitch --ckpt tabcrnn_deep2.pt --load-cal checkpoints/tabcrnn_deep2.cal.json --splits gaps_test val val_comp
+python -m scripts.eval.diagnose_pitch --ckpt tabcrnn_deep2.pt --load-cal checkpoints/tabcrnn_deep2.cal.json --splits gaps_val val_comp
+# GS solo tab F1: eval_hmm komutu (çözümleme değerleriyle) docs/devlog/README13.md içinde
+
+# Klasik edisyon önerisi (konum + sol el parmağı; README14)
+python -m scripts.train.train_edition_seq
+python -m scripts.eval.eval_edition
+
+# Ritim ve kuantalama (Katman 5; README15)
+python -m scripts.data.build_rhythm
+python -m scripts.eval.eval_rhythm
+python -m scripts.train.train_rhythm_q              # Adım 1q, ~11 dk
+python -m scripts.eval.eval_rhythm --qnet rhythm_q.pt
+python -m scripts.data.build_beat_feats           # Adım 1b, ~1 GB
+python -m scripts.train.train_beat
+python -m scripts.eval.eval_rhythm --qnet rhythm_q.pt --beatnet beat_net.pt
+python -m scripts.eval.eval_rhythm --qnet rhythm_q.pt --beatnet beat_net.pt --user-tempo   # yarı otomatik
+
+# Ölçülü TAB (Katman 5 Adım 2; README16)
+python -m scripts.eval.eval_score
+python -m scripts.app.transcribe kayit.wav --bpm 80 --meter 3/4 [--mode edisyon]
+
+# Eski katmanların komutları (Katman 2–3.8): archive/README.md
 ```
 
 ## Veri seti ve eğitilmiş modeller
@@ -175,8 +197,8 @@ kütüphanesi ile indirilir ([scripts/data/get_guitarset.py](scripts/data/get_gu
   GuitarSet (mirdata), GAPS v1.1 (https://huggingface.co/datasets/xavriley/GAPS),
   SynthTab (https://github.com/yongyizang/SynthTab). Önbellek, `scripts/data/`
   altındaki script'lerle yeniden üretilir (komutlar yukarıda ve devlog'larda).
-- **[checkpoints/](checkpoints/)** — ilgili katmanlarda eğitilmiş, doğrudan yüklenebilir model
-  ağırlıkları (`pitchcnn.pt`, `tabcnn.pt`, `tabcrnn.pt`, `tabcrnn_comp.pt` = güncel en iyi, ...).
+- **[checkpoints/](checkpoints/)** — aktif modeller: `tabcrnn_deep2.pt` (güncel ses tabanı) + kalibrasyonu,
+  `edition_seq.pt` (edisyon önerisi), `transitions.npz`; eski modeller `checkpoints/archive/` altında.
 
 ## Geliştirme günlüğü (katman katman)
 
@@ -198,6 +220,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README12.md](docs/devlog/README12.md) — Katman 3.11 (hızlı tekrarlar: yerel tepe çözümlemesi, noisy-OR, perde-onset)
 - [docs/devlog/README13.md](docs/devlog/README13.md) — Katman 3.12 (akustik katman: kapasite mi veri mi; derin CNN / SynthTab ön-eğitimi)
 - [docs/devlog/README14.md](docs/devlog/README14.md) — Katman 3.13 (GAPS partisyonundan tel etiketi + parmak numarası; README9 3.8e)
+- [docs/devlog/README15.md](docs/devlog/README15.md) — Katman 5 (ritim ve kuantalama: vuruş, ölçü başı, nota değerleri)
+- [docs/devlog/README16.md](docs/devlog/README16.md) — Katman 5 Adım 2 (ölçülü TAB çıktısı: MusicXML, uçtan uca komut)
 
 ## Yol haritası
 
@@ -227,6 +251,11 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
       hammer-on/pull-off, vibrato tespiti
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile
-      bend/slide sembollü gerçek tab görseli
+      bend/slide sembollü gerçek tab görseli — **çekirdek tamamlandı** (ritim + MusicXML; AlphaTab görüntüleyici açık;
+      Katman 4'ten önce, kullanıcı kararı;
+      bkz. [docs/devlog/README15.md](docs/devlog/README15.md)): GAPS partisyonundan rubato'lu vuruş / ölçü başı /
+      nota konumu etiketleri (166 kayıt), eğitimsiz taban ölçüldü; Adım 1q bağlamlı kuantalayıcı (`rhythm_q.pt`) kabul (gaps_test oracle IOI 0.933); Adım 1b öğrenilen
+      vuruş + DBN: tam otomatik hedefin altında → yarı otomatik (kullanıcı BPM + ölçü; uçtan uca 0.695) kullanıcı kararıyla
+      bu hâliyle; Adım 2 ölçülü TAB (MusicXML) kodlandı ([README16](docs/devlog/README16.md))
 - [ ] Katman 6 — Zorlaştırma: polifoni (akorlar), distortion dayanıklılığı,
       farklı gitar/akort desteği

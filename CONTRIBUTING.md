@@ -66,7 +66,8 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `.gitignore` | `data/` ve önbellekleri git dışında tutar |
 | `inputs/` | Proje sunumu (ana plan) ve katman karar belgeleri |
 | `docs/devlog/` | Katman katman geliştirme günlüğü (en yüksek numara = güncel katman) |
-| `checkpoints/` | Eğitilmiş modeller (aşağıda) |
+| `checkpoints/` | Aktif modeller (aşağıda); eskiler `checkpoints/archive/` |
+| `archive/` | Eski ve reddedilen kod — aktif hatta kullanılmaz (bkz. `archive/README.md`) |
 | `data/` | *(git'te yok)* `raw/` = ham veri setleri, `cache/` = CQT + etiket önbelleği |
 
 ### `gtab/` — kütüphane (yalnızca import edilir)
@@ -83,15 +84,26 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/torch_dataset.py` | Eğitim veri setleri: pencere (CNN), sekans (CRNN), perde etiketli sekans (GAPS) |
 | `data/guitarset.py` | GuitarSet yardımcıları (oyuncu, solo/akor, nota dönüşümü) |
 | `data/gaps.py` | GAPS okuyucu, icracı-ayrık doğrulama bölmesi |
-| `data/synthtab.py` | SynthTab okuyucu (zip'leri açmadan okur; doğrulanmış dosya yapısı belgeli) |
+| `data/gaps_score.py` | GAPS MusicXML TAB + parmak → tekrar açma + syncpoint + MIDI eşleme (Katman 3.13); nota başına partisyon konumu + ölçü imleri (Katman 5) |
+| `data/rhythm_labels.py` | Ritim etiketleri: GAPS partisyon konumundan rubato'lu vuruş / ölçü başı + nota başına vuruş konumu; GuitarSet JAMS vuruşları (Katman 5) |
 | `models/nets.py` | PitchCNN, TabCNN, TabCRNN, TabCRNNOnset, HarmonicStack; eski ağırlıklardan sıcak başlatma |
 | `models/losses.py` | Tel olasılıklarından perde ve perde-onset olasılığı (perde etiketli veride kayıp için) |
-| `models/inference.py` | Model yükleme (türü checkpoint'ten tanır), uzun kayıtlarda parça parça çıkarım |
+| `models/inference.py` | Model yükleme (türü checkpoint'ten tanır; varsayılan `tabcrnn_deep2.pt`), uzun kayıtlarda parça parça çıkarım |
+| `models/edition_net.py` | "Klasik edisyon önerisi": nota dizisi → tel/perde + sol el parmağı (iki yönlü dizi modeli) |
 | `decoding/decode.py` | Olasılık → nota → ASCII TAB; nota başına tel seçimi |
 | `decoding/viterbi.py` | Perde matrisi, nota bulma (eşik tabanlı ve onset tabanlı), el yapımı Viterbi |
 | `decoding/transitions.py` | Veriden öğrenilen tel geçiş modeli ve Viterbi'si |
+| `models/rhythm_net.py` | Bağlamlı kuantalayıcı (Katman 5 Adım 1q): notalar + vuruşlar → vuruş içi konum (BiLSTM + vuruş başına ortak ızgara çözümlemesi) |
+| `models/beat_net.py` | Öğrenilen vuruş + ölçü başı aktivasyonu (Katman 5 Adım 1b): deep2 gövde temsili → BiLSTM → (yok / vuruş / ölçü başı) |
+| `decoding/edition.py` | Edisyon önerisi için nota dizisi yardımcıları (akor gruplama, etiket okuma, taban parmak kuralı) |
+| `decoding/rhythm.py` | Ritim (Katman 5): başlangıç zarfları, vuruş takibi (dp / plp), ölçü başı + ölçü, kuantalama (vuruş içi bölüm seçimi) |
+| `decoding/beat_dbn.py` | Bar-pointer DBN (tempo × ölçü içi konum × ölçü 1–4; tek karelik vuruş bölgesi) + tepe seçimi tabanı |
 | `evaluation/metrics.py` | Ortak metrikler (P/R/F1, tab F1, onset F1) |
+| `evaluation/rhythm_metrics.py` | Ritim metrikleri: vuruş / ölçü başı F, CMLt / AMLt, tempo Acc1/2, konum ve IOI (nota değeri) doğruluğu |
 | `evaluation/pitch_eval.py` | Perde/nota değerlendirme çekirdeği: alan-içi kalibrasyon (GuitarSet→val, GAPS→gaps_val), çözümleme kuralı araması, 50/100 ms nota F1 |
+| `render/score.py` | Ölçülü TAB modeli (Katman 5 Adım 2): konumlar + ölçü başı + ölçü imi → ölçüler, bağlar, nota değerleri |
+| `render/musicxml.py` | MusicXML yazıcı (GAPS düzeni: nota portresi + parmak, TAB portresi + akort) |
+| `pipeline.py` | Uçtan uca transkripsiyon: CQT → notalar → tel/perde (ses / edisyon) → yarı otomatik vuruş → 1q → ölçüler |
 
 ### `scripts/` — çalıştırılan dosyalar
 | Dosya | Görevi |
@@ -99,32 +111,31 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/get_guitarset.py`, `data/get_gaps.py` | Veri setlerini indirir |
 | `data/build_guitarset.py`, `data/build_tab_labels.py`, `data/build_comp.py` | GuitarSet solo ve akorlu kayıt önbelleği |
 | `data/build_gaps.py` | GAPS önbelleği (`--disjoint` = icracı-ayrık) |
-| `data/build_synthtab.py` | SynthTab naylon önbelleği (`--inspect` ile yapı kontrolü) |
-| `train/train_pitch.py` | Katman 2: perde modeli |
-| `train/train_tab.py` | Katman 3: TabCNN |
-| `train/train_crnn.py` | Katman 3.5–3.7: TabCRNN (`--splits`, `--ckpt`) |
-| `train/train_domain.py` | Katman 3.8: GuitarSet (tab) + GAPS (perde) karışık eğitim |
-| `train/train_onset.py` | Katman 3.9: onset kafası (`--harmonics default` ile harmonik istifleme) |
-| `eval/sweep_threshold.py` | Katman 2 eşik taraması |
-| `eval/eval_viterbi.py` | Katman 3.6: baseline / greedy / Viterbi karşılaştırması |
+| `data/build_gaps_tab.py` | GAPS partisyon TAB + parmak etiketleri → `data/cache/gaps_tab/` |
+| `data/build_rhythm.py` | Ritim etiketleri (GAPS + GuitarSet) → `data/cache/rhythm/` |
+| `data/build_beat_feats.py` | deep2 gövde temsili önbelleği → `data/cache/beat_feats/<ckpt>/` (vuruş ağı girdisi) |
+| `train/train_onset.py` | Ses modeli eğitimi (onset/offset/perde-onset kafaları, derin CNN; güncel taban deep2) |
+| `train/train_edition_seq.py` | Edisyon önerisi dizi modeli (sembolik, ~2 dk) |
+| `train/train_rhythm_q.py` | Bağlamlı kuantalayıcı (sembolik, vuruş/nota bozma artırması; ~11 dk) → `rhythm_q.pt` |
+| `train/train_beat.py` | Vuruş + ölçü başı ağı (tempo artırması, DBN ayar taraması) → `beat_net.pt` |
+| `eval/eval_pitch.py` | Nota ve kare F1, polifoni kırılımı, kalibrasyon (`--save-cal` / `--load-cal`) |
+| `eval/diagnose_pitch.py` | Kaçan/hayalet notaların nedeni, hızlı tekrarlar, tepe görünürlüğü |
 | `eval/eval_hmm.py` | Tel ataması teşhisi + uçtan uca tab F1 (**ana GuitarSet ölçümü**) + `--demo` |
-| `eval/eval_pitch.py` | Nota ve kare F1, polifoni kırılımı (GAPS ve GuitarSet) |
-| `eval/diagnose_strings.py` | Hata analizi: kayıp nereden geliyor, hangi teller karışıyor |
-| `eval/diagnose_pitch.py` | Katman 3.10: kaçan/hayalet notaların nedeni, süre/register/polifoni kırılımı |
-| `eval/check_gaps_labels.py` | Katman 3.10: GAPS `.match` eşleşme oranı ile model hatası ilişkisi |
-| `eval/diagnose_onset_features.py` | Katman 3.10 Adım 3c-0: hızlı tekrarları hangi giriş özelliği ayırır (CQT / kısa pencere STFT; model yok) |
+| `eval/eval_edition.py` | Edisyon önerisi: tel uyumu, parmak (ürün sayısı), uçtan uca (deep2 notaları) |
+| `eval/eval_score.py` | Ölçülü TAB: MusicXML gidiş-dönüş + uçtan uca ölçü içi konum (Katman 5 Adım 2) |
+| `app/transcribe.py` | Ürün komutu: ses (ya da .npz) + `--bpm` + `--meter` → `.musicxml` |
+| `eval/eval_rhythm.py` | Ritim: kuantalayıcı tavanı, vuruş takibi, ölçü başı, kuantalama zinciri (Katman 5); `--qnet` ile 1q, `--beatnet` ile 1b satırları |
+
+Eski katmanların betikleri (Katman 2–3.8 eğitimleri, tamamlanmış tanılamalar, SynthTab hattı, reddedilen
+adımlar) `archive/` altında; liste ve çalıştırma için `archive/README.md`.
 
 ### `checkpoints/`
 | Dosya | Katman | Not |
 |---|---|---|
-| `pitchcnn.pt`, `tabcnn.pt`, `tabcrnn.pt` | 2, 3, 3.5 | ilk modeller |
-| `tabcrnn_base.pt`, `tabcrnn_comp.pt`, `tabcrnn_aug.pt` | 3.7 | taban / +akor / +çoğaltma (zararlı çıktı) |
-| `tabcrnn_gaps.pt` | 3.8 | + GAPS ince ayarı |
-| `tabcrnn_onset.pt` | 3.9 | + onset kafası |
-| **`tabcrnn_onset_h.pt`** | 3.9 | Katman 3.9 tabanı: + harmonik istifleme (GS tab F1 0.743, kurallar + mix) |
-| `tabcrnn_poly.pt` | 3.10 | + keskin onset, GuitarSet perde kaybı, kısa nota ağırlığı (tab F1 0.749 / 0.753) |
-| **`tabcrnn_rep_off.pt`** | 3.10 | **Güncel taban:** + offset kafası, hızlı tekrar onset ağırlığı, GAPS perde ağırlığı ×2 (tab F1 0.760, GAPS nota/kare 0.689/0.675) |
-| `transitions.npz` | 3.6b | öğrenilen tel geçiş modeli |
+| **`tabcrnn_deep2.pt`** + `tabcrnn_deep2.cal.json` | 3.12 | **Güncel ses tabanı** ("duyulan konum"): GS tab F1 0.777, GAPS nota/kare 0.779 / 0.701; kalibrasyon seçimi (`--load-cal`) |
+| **`edition_seq.pt`** | 3.13 | "Klasik edisyon önerisi": GAPS tel 0.815, parmak 0.636 (ürün tam 0.434) |
+| `transitions.npz` | 3.6b | öğrenilen tel geçiş modeli (`eval_hmm`) |
+| `archive/*` | 2 – 3.13 | eski tabanlar ve reddedilen modeller (pitchcnn … rep_valley, deep, gtab, edition.npz) |
 
 ## Çalışma kuralları
 1. **Katman modeli:** Her yeni adım öncekini kırmadan eklenir. Mevcut bir checkpoint'in

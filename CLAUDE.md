@@ -55,13 +55,51 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   `tabcrnn_gtab.pt` → **kabul edilmedi** (seçim hiç ep 0'ı geçmedi → dosya = deep2; gaps_val tab F1 +0.004, GS tab
   −0.035): partisyon TAB'ı icracıya genellenmiyor, ses kaybı olarak kullanma.
   **Adım 2 (kullanıcı planı; sunum modül 4 + 7): "klasik edisyon önerisi" = sembolik konum + sol el parmağı.**
-  2a log-lineer (`gtab/decoding/edition.py`, `edition.npz`) yetmedi (parmak < taban). **2b iki yönlü dizi modeli
+  2a log-lineer (arşivde: `archive/gtab/decoding/edition_loglinear.py`, `checkpoints/archive/edition.npz`) yetmedi (parmak < taban). **2b iki yönlü dizi modeli
   (`gtab/models/edition_net.py`, `train_edition_seq`, `edition_seq.pt`) KABUL:** gaps_test tel 0.815 (naif 0.745),
   parmak 0.636 (taban 0.566), ses modu GuitarSet 0.878 değişmedi. Ürün iki mod: "duyulan konum" (ses) / "edisyon
   önerisi"; **karıştırılmaz** (kullanıcı kararı; karışım koddan çıkarıldı). Ürün parmak (konum + parmak tam) 0.434 >
   aynı konumda taban 0.376; uçtan uca (deep2 notaları, gaps_test) tel 0.802 bulunanlarda / 0.655 tüm etiketlilerde,
   tam parmak 0.397 / 0.331 (nota bulma %81.7). Ölçüm: `python -m scripts.eval.eval_edition` (varsayılanlar).
-  Teknikler (Katman 4) sonra. Aşağıdaki maddeler geçmiş kayıttır.
+  Teknikler (Katman 4) sonra.
+- **Katman 5 — Ritim ve kuantalama: ÇEKİRDEK TAMAMLANDI (11 Ekim; `docs/devlog/README15.md`, `README16.md`; AlphaTab görüntüleyici açık).**
+  Etiket: GAPS partisyon konumu → rubato'lu vuruş / ölçü başı / nota başına vuruş konumu (`gtab/data/rhythm_labels.py`,
+  `align` artık `score_x` döndürüyor, eski çıktılar birebir), GuitarSet JAMS; `build_rhythm` → `data/cache/rhythm/`
+  (GAPS 166 kayıt, syncpoint uyumu 23 ms). Eğitimsiz taban `gtab/decoding/rhythm.py` (vuruş dp/plp, ölçü başı kuralı,
+  vuruş başına ızgara kuantalayıcı), ölçüm `python -m scripts.eval.eval_rhythm` (~6 dk). Ana ölçüt **IOI doğruluğu**
+  (nota değerleri; tahmini vuruşta kayıt başına ölçek). **Adım 0 ölçüldü:** gaps_test kuantalayıcı tavanı 0.821 (< 0.90),
+  vuruş F 0.444 (< 0.75; gerçek nota zarfı da aynı → izleyici sorunu), ölçü başı 0.789, uçtan uca IOI 0.588; deep2
+  notaları yalnız −0.02. **Sırada (kullanıcı kararı):** Adım 1q bağlamlı kuantalayıcı (sembolik dizi modeli) ve Adım 1b
+  öğrenilen vuruş + ölçü başı izleyici (deep2 temsili + bar-pointer DBN); öneri 1q önce.
+  **Adım 1q kodlandı (11 Ekim, kullanıcı onayı):** `gtab/models/rhythm_net.py` (BiLSTM, nota başına delta tick +
+  yerel tick histogramı + vuruş başına ortak ızgara çözümlemesi), `train_rhythm_q` (gaps_fit, vuruş/nota bozma artırması,
+  80 ep) → `rhythm_q.pt`; `eval_rhythm --qnet rhythm_q.pt`. Denemeler: gaps_val oracle IOI 0.819 → 0.923, gürültülü vuruş
+  0.614 → 0.766; ara model gaps_test oracle 0.907, uçtan uca 0.618 (kural 0.588). Artırmasız model temiz vuruşa aşırı
+  uyuyor (0.928 / 0.517) — artırmayı kaldırma. **Kullanıcının eğitimi + ölçümü bekleniyor**; kabul: gaps_test oracle ≥ 0.90
+  ve uçtan uca ≥ kural; sonra 1b (tavan = 1q oracle).
+  **1q KABUL (11 Ekim, kullanıcı):** gaps_test oracle IOI 0.933, gerçek vuruş + deep2 0.927, uçtan uca 0.617 (kural 0.588).
+  **Adım 1b kodlandı (11 Ekim):** `gtab/decoding/beat_dbn.py` (numpy bar-pointer DBN; madmom'un tempoyla genişleyen vuruş
+  bölgesi 43 kare/sn'de yavaş tempoya kilitliyordu → tek kare), `gtab/models/beat_net.py` (deep2 `encode` temsili → BiLSTM),
+  `build_beat_feats` (`data/cache/beat_feats/tabcrnn_deep2/`, 808 MB, yapıldı), `train_beat` (`--stretch` tempo artırması),
+  `eval_rhythm --beatnet`. Denemeler: gaps_test vuruş F 0.44–0.50 (taban 0.444), ölçü başı 0.42–0.44 (0.19), uçtan uca
+  0.57–0.63 (taban 0.617, hedef 0.833) → hedefin çok altında. Vuruş F'si IOI'ye taşınmıyor (IOI kayıt başına tek ölçek;
+  parça içi metrik düzey değişimi); 10 ep sonrası ezber; GuitarSet solo'da vuruş ipucu yok.
+  **Kullanıcı kararı (11 Ekim): yarı otomatik** — kullanıcı BPM + ölçü verir, DBN o ölçüde BPM ± aralıkta çözer
+  (`eval_rhythm --beatnet beat_net.pt --user-tempo`; taklit girdi = gerçek medyan tempo x (1 ± %10) + gerçek ölçü; aralık ve
+  geçiş cezası gaps_val uçtan uca IOI ile). Deneme (tempo artırmalı ağ): gaps_test vuruş F 0.631, ölçü başı 0.582, uçtan uca
+  0.695, metrik düzey %96 doğru; eşikler (0.75 / 0.60 / 0.833) beklenen sonuçla sağlanmıyor. `train_beat` varsayılanı
+  30 ep + `--stretch 0.25`. **Kullanıcı çalıştırması birebir (`beat_net.pt`); kullanıcı kararı: bu hâliyle Adım 2, tap modu yedek.**
+  **Adım 2 — ölçülü TAB (MusicXML) kodlandı (11 Ekim, `docs/devlog/README16.md`):** `gtab/render/score.py` (ölçüler, bağlar,
+  nota değerleri; tek ritim sesi), `gtab/render/musicxml.py` (GAPS düzeni: nota + parmak / TAB + akort), `gtab/pipeline.py`
+  (uçtan uca), `scripts/app/transcribe.py` (ses + `--bpm` + `--meter` → .musicxml; yeni `scripts/app/`),
+  `scripts/eval/eval_score.py`. Gidiş-dönüş 202 partisyon / 159 796 nota **birebir 1.0000**, doluluk %100 (scordatura →
+  akort parametre). **Ölçüldü → Adım 2 KAPANDI:** dosyalar %100 geçerli, IOI/ölçü başı eval_rhythm ile birebir,
+  ölçü içi konum (tek imli) gaps_test 0.611 = yeni ritim tabanı. Sırada (kullanıcı kararı): AlphaTab web TAB görüntüleyici.
+- **Temizlik (10 Ekim):** eski / reddedilen kod `archive/` (bkz. `archive/README.md`), eski checkpoint'ler
+  `checkpoints/archive/`. Aktif: data betikleri, `train_onset`, `train_edition_seq`, `eval_pitch`, `diagnose_pitch`,
+  `eval_hmm`, `eval_edition`; checkpoint `tabcrnn_deep2.pt` (+cal), `edition_seq.pt`, `transitions.npz`.
+  `load_model` varsayılanı artık `tabcrnn_deep2.pt`. Eski checkpoint: `--ckpt checkpoints/archive/<ad>.pt`.
+  Aşağıdaki maddeler geçmiş kayıttır (adı geçen eski dosyalar arşivde).
 - **Eski taban: `checkpoints/tabcrnn_rep_off.pt`** (TabCRNNOnset + harmonik istifleme + offset kafası;
   tabcrnn_poly'den `train_onset --repeat-weight 3 --pitch-weight 2 --offset-weight 1`).
   GS solo tab F1 **0.760**, oracle tel 0.862, GAPS test nota/kare **0.689/0.675**, val_comp 0.769/0.817,

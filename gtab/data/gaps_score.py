@@ -224,7 +224,9 @@ def align(gaps_dir, tid, instrument_tuning, tol1=0.25, tol2=0.08, win=2 * TPQ, s
       3) kaba eşleme (tol1) -> yerel zaman düzeltmesi (±win tick kayan medyan; arpej/rubato) -> ince eşleme (tol2)
     Tel = partisyon TAB'ı; perde (fret) = MIDI perdesi − standart açık tel (kapo/akort farkını içerir).
     -> dict(consistent, shift, n_bars, n_sync, notes=[(başlangıç, bitiş, perde)], string (0 = pes) | -1, fret | -1,
-            finger | -1, dt)
+            finger | -1, dt, order, lens, score_x)
+       Katman 5: order / lens = açılmış ölçü sırası ve uzunlukları (tick); score_x = eşleşen MIDI notasının
+       partisyon konumu (açılmış baştan tick) | nan.
     """
     import pretty_midi
     order, lens, notes, tuning = score_notes(os.path.join(gaps_dir, "musicxml", f"{tid}.xml"))
@@ -252,4 +254,18 @@ def align(gaps_dir, tid, instrument_tuning, tol1=0.25, tol2=0.08, win=2 * TPQ, s
         if 0 <= f <= 24:
             string[i], fret[i], finger[i] = s, f, notes[j]["finger"]
     return dict(consistent=n_sync in (len(order) - 1, len(order)), shift=shift, n_bars=len(order), n_sync=n_sync,
-                notes=mn, string=string, fret=fret, finger=finger, dt=dts, matched=mi >= 0)
+                notes=mn, string=string, fret=fret, finger=finger, dt=dts, matched=mi >= 0,
+                order=order, lens=lens, score_x=np.where(mi >= 0, x[np.maximum(mi, 0)], np.nan))
+
+
+def time_signatures(xml_path):
+    """Katman 5: MusicXML -> ölçü başına (beats, beat_type); <time> ilk portrede, sonraki ölçülere taşınır."""
+    root = ET.parse(xml_path).getroot()
+    out, cur = [], None
+    for m in root.find("part").findall("measure"):
+        t = m.find("attributes/time")
+        if t is not None and t.findtext("beats", "").isdigit():
+            cur = (int(t.findtext("beats")), int(t.findtext("beat-type")))
+        out.append(cur)
+    first = next((s for s in out if s), (4, 4))
+    return [s or first for s in out]
