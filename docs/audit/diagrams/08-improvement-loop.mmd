@@ -1,0 +1,44 @@
+%% Diyagram 8 — Kontrollu gelistirme ve iyilestirme dongusu (11 adim)
+%% Bu dongu projenin kendi kurali: CONTRIBUTING.md kural 3 ve 5
+flowchart TD
+    S(["BIR SORUN SECILIR<br/><i>ISSUE_REGISTER.md ID'si</i>"])
+
+    N1["<b>1. SORUNU TANIMLA</b><br/>Hangi kayip? Hangi kullaniciya etkisi?<br/><i>devlog/README&lt;N&gt;.md acilir</i>"]
+    N2["<b>2. MEVCUT METRIGI OLC</b><br/>Taban = mevcut checkpoint, DEGISIKLIK YOK<br/><i>d1_baseline.json'dan veya yeni olcum</i>"]
+    N3["<b>3. HATALI ORNEKLERI INCELE</b><br/>diagnose_pitch / diagnose_strings /<br/>eval_playability<br/><i>YALNIZ val · val_comp · gaps_val</i>"]
+    N4["<b>4. KOK NEDEN HIPOTEZI</b><br/>Tek bir cumle: 'X, Y yuzunden oluyor'<br/><i>olcumle desteklenmeli</i>"]
+    N5["<b>5. KABUL OLCUTUNU ONCEDEN YAZ</b><br/>Sayisal hedef + hangi split + hangi metrik<br/>+ neyin DUSMEMESI gerektigi<br/><i>olcumden ONCE devlog'a</i>"]
+    N6["<b>6. TEK KONTROLLU DEGISIKLIK</b><br/>Yeni dosya / yeni bayrak<br/>VARSAYILAN = eski davranis birebir<br/><i>birden fazla degisken DEGISTIRILMEZ</i>"]
+    N7["<b>7. REGRESYON KONTROLU</b><br/>unittest 170 · check_protocol 17 ·<br/>check_inference_regression<br/><i>eski model + eski kod = eski sonuc</i>"]
+    N8["<b>8. AYNI KOSULLARDA YENIDEN DEGERLENDIR</b><br/>Ayni split · ayni kalibrasyon yontemi ·<br/>ayni seed · ayni metrik grubu"]
+    N9{"<b>9. OLCUT SAGLANDI MI?</b><br/>tolerans: yeniden-kosu 0.002 ·<br/>yeniden-egitim 0.01"}
+    N10["<b>10a. KORU</b><br/>Yeni taban olur; d1_baseline.json'a satir<br/>CLAUDE.md guncel durum + devlog sonuclari"]
+    N11["<b>10b. NEDENINI ARASTIR + KAYDET</b><br/>CLAUDE.md 'denenmis, ise yaramayan'<br/>TABAN KORUNUR (kept_initial)"]
+    N12["<b>11. BELGELEME</b><br/>devlog: neden · ne yapildi · testler ·<br/>calistirma · karar kurali · sonuclar ·<br/>acik riskler"]
+
+    S --> N1 --> N2 --> N3 --> N4 --> N5 --> N6 --> N7 --> N8 --> N9
+    N9 -->|"EVET"| N10 --> N12
+    N9 -->|"HAYIR"| N11 --> N12
+    N12 -. "yeni hipotez" .-> N4
+    N12 --> S
+
+    subgraph UYG["BU DONGU HANGI ISLERDE KULLANILACAK"]
+        U1["<b>Model egitimi / fine-tuning</b><br/>olcut: nota F1 (mir_eval 50 ms) + tab F1<br/>+ GuitarSet'te DUSMEME kosulu"]
+        U2["<b>Decoder degisiklikleri</b><br/>olcut: alan ici kalibrasyon sonrasi<br/>nota F1 + precision/recall dengesi"]
+        U3["<b>Veri artirma</b><br/>olcut: hedef alanda kazanc +<br/>kaynak alanda kayip &lt;= 0.01"]
+        U4["<b>Tel/perde dogrulugu (A-01)</b><br/>olcut: tel basina dogruluk<br/>(ORACLE NOTA; tab F1 ile karistirilmaz)"]
+        U5["<b>Nota kacirma (B-01, B-02)</b><br/>olcut: recall + 'perde hic aktif degil' orani<br/>+ tekrar kacma yuzdesi"]
+        U6["<b>Akor fragmanlari (C-01)</b><br/>olcut: precision + fragman orani<br/>(polifoni seviyesine gore kirilim)"]
+        U7["<b>Parmaklandirma (P4)</b><br/>olcut: cakisma sayisi + aciklik dagilimi<br/>+ parmak dogrulugu DUSMEME"]
+    end
+
+    METRIK["<b>METRIK KURALI</b><br/>Yalniz accuracy'ye BAKILMAZ.<br/>Nota: precision / recall / F1 (mir_eval, 50 ms)<br/>Kare: perde P/R/F1<br/>Gitar: tel dogrulugu · fret dogrulugu · tab F1<br/>Polifoni: 1 / 2 / 3 / 4+ es zamanli nota kirilimi<br/>Parmak: ihlal sayisi · hareket maliyeti · aciklik<br/>Ritim: vurus F · CMLt · AMLt · IOI · olcu ici konum"]
+
+    N8 -.- METRIK
+    N5 -.- METRIK
+    UYG -.- N1
+
+    classDef gate fill:#5c4a00,color:#fff,stroke-width:3px
+    classDef note stroke-width:3px
+    class N5,N7 gate
+    class METRIK note

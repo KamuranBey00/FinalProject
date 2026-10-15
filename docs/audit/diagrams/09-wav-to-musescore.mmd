@@ -1,0 +1,76 @@
+%% Diyagram 9 — WAV'dan MuseScore 4'e kadar gercek adimlar
+%% Kesikli = yalniz origin/katman-5-ritim · Kirmizi = eksik/dogrulanmamis
+%% Kaynak: gtab/pipeline.py, gtab/render/{score,musicxml}.py, scripts/app/transcribe.py (hepsi katman-5)
+flowchart TD
+    U1["<b>KULLANICI GIRDISI</b><br/>kayit.wav<br/>+ yaklasik BPM (vurus birimine gore)<br/>+ olcu imi (orn. 3/4)<br/><i>ritim YARI OTOMATIK: BPM tek basina<br/>metrik duzey icin belirsiz</i>"]
+
+    P1["<b>1. CQT</b><br/>data/features.py : cqt_from_file<br/>22050 Hz mono, 192 bin, hop 512"]
+    P2["<b>2. SES MODELI</b><br/>checkpoints/tabcrnn_deep2.pt<br/>4 kafa: tab · onset · offset · perde-onset"]
+    P3["<b>3. KALIBRE COZUMLEME</b><br/>tabcrnn_deep2.cal.json [gaps_val]<br/>decoding/viterbi.py : segment<br/>-> notes (N,3) saniye"]
+    P4a["<b>4a. SES MODU</b><br/>transitions.py : build_lattice + decode_lattice<br/>'duyulan konum'<br/><i>GAPS oracle tel 0.610</i>"]
+    P4b["<b>4b. EDISYON MODU</b><br/>edition_net.py : EditionNet + resolve_chords<br/>'klasik edisyon onerisi' + sol el parmagi<br/><i>gaps_test tel 0.815 · parmak 0.636</i>"]
+    MOD["<b>IKI MOD KARISTIRILMAZ</b><br/><i>kullanici karari; karisim koddan cikarildi</i>"]
+
+    P5["<b>5. VURUS AKTIVASYONU</b><br/>models/beat_net.py : BeatNet<br/>donmus deep2 temsili -> kare basina<br/>(yok / vurus / olcu basi)"]
+    P6["<b>6. VURUS COZUMLEME</b><br/>decoding/beat_dbn.py : dbn_decode<br/>bar-pointer DBN, BPM +-%35, trans 10 / obs 32<br/>-> beats, downbeats (sn)<br/><i>vurus F 0.631 · olcu basi F 0.582</i>"]
+    P7["<b>7. KUANTALAMA</b><br/>models/rhythm_net.py : RhythmNet (1q)<br/>1/24 vurus izgarasi, yapisal cozumleme<br/>-> q (N,) vurus konumu<br/><i>oracle IOI 0.933 · uctan uca 0.695</i>"]
+    P8["<b>8. OLCU MODELI</b><br/>render/score.py : build_measures<br/>olcu cizgisi · nota degeri (tam..128'lik,<br/>1-2 nokta, ucleme) · bag · sus"]
+    P9["<b>9. MUSICXML YAZICI</b><br/>render/musicxml.py : write_musicxml<br/>score-partwise 4.0 · divisions = 24/vurus<br/>P1: nota portresi (8vb sol anahtari,<br/>metronom, &lt;fingering&gt;)<br/>P2: TAB portresi (6 cizgi, &lt;staff-tuning&gt;,<br/>&lt;string&gt; &lt;fret&gt;)"]
+    P10["<b>10. .musicxml DOSYASI</b>"]
+    P11["<b>11. MUSESCORE 4</b><br/><i>gorsel kontrol — HENUZ YAPILMADI</i>"]
+
+    subgraph DOG1["BICIM DOGRULUGU — OLCULDU, TAM"]
+        V1["Gidis-donus: 202 partisyon,<br/>159.796 nota -> <b>birebir 1.0000</b><br/>(score_notes ile geri okundu)"]
+        V2["Olcu dolulugu bozuk: <b>0 / 14.398</b>"]
+        V3["Uctan uca dosya gecerliligi: <b>%100</b><br/>geri okuma + tek tip olcu<br/>(gaps_val 15 + gaps_test 23)"]
+        V4["Komut satiri duman testi:<br/>027_Zpswc 1613 nota, 131 olcu, 5-12 sn"]
+    end
+
+    subgraph DOG2["MUZIKAL DOGRULUK — OLCULDU, EKSIK"]
+        W1["Nota F1 (gaps_test): <b>0.779</b><br/>nota kapsami <b>0.817</b>"]
+        W2["Olcu ici konum (tek olcu imli):<br/><b>0.611</b> &lt;- RITIM TABAN OLCUTU"]
+        W3["IOI (nota degerleri): <b>0.695</b>"]
+        W4["Olcu basi F: <b>0.582</b><br/><i>olcu cizgileri kayabiliyor</i>"]
+    end
+
+    subgraph EKS["EKSIK / BILEREK KAPSAM DISI"]
+        X1["Ses ayrimi (voicing): tek ritim sesi;<br/>bas/melodi sap yonu YOK"]
+        X2["&lt;tuplet&gt; koseli parantez YOK<br/>(yalniz time-modification)"]
+        X3["Tek olcu imi; imi degisen parcalar<br/>tek kullanici imiyle temsil edilemiyor"]
+        X4["Anakruz susla doluyor"]
+        X5["1/24 izgarasi disi %0.6 nota yazilmiyor"]
+        X6["Teknik isaretleri (bend/slide/legato) YOK<br/><i>Katman 4 beklemede</i>"]
+        X7["AlphaTab web goruntuleyici YOK<br/><i>orijinal Katman 5 hedefi</i>"]
+    end
+
+    U1 --> P1 --> P2 --> P3
+    P3 --> P4a
+    P3 --> P4b
+    P4a -.- MOD
+    P4b -.- MOD
+    P2 -.-> P5
+    U1 --> P6
+    P5 -.-> P6
+    P6 -.-> P7
+    P3 -.-> P7
+    P7 -.-> P8
+    P8 -.-> P9
+    P4a -.-> P9
+    P4b -.-> P9
+    P9 -.-> P10 -.-> P11
+
+    P9 --- DOG1
+    P10 --- DOG2
+    P9 --- EKS
+
+    NOT["<b>KRITIK AYRIM</b><br/>MusicXML'in MuseScore'da duzgun acilmasi<br/>notalarin DOGRU TAHMIN EDILDIGINI KANITLAMAZ.<br/>Bicim gecerliligi (%100) ile muzikal dogruluk (0.611)<br/>AYRI SAYILARDIR. Gorsel inceleme yalniz birinciyi dogrular."]
+    P11 --- NOT
+
+    classDef k5 stroke-dasharray: 6 4
+    classDef bad fill:#4a1515,color:#fff
+    classDef ok fill:#2d5016,color:#fff
+    classDef note stroke-width:3px
+    class P5,P6,P7,P8,P9,P10 k5
+    class P11,X1,X2,X3,X4,X5,X6,X7 bad
+    class V1,V2,V3,V4 ok
+    class NOT,MOD note

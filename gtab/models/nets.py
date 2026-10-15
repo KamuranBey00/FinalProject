@@ -193,13 +193,18 @@ class TabCRNNOnset(TabCRNN):
         off = self.offset_head(z) if self.offset_head is not None else None
         return tab, self.onset_head(z), off
 
-    def forward_full(self, x):
-        """Katman 3.12: -> tab, tel onset, tel offset | None, perde-onset logit (B,L,P) | None"""
+    def forward_full(self, x, return_features=False):
+        """
+        Katman 3.12: -> tab, tel onset, tel offset | None, perde-onset logit (B,L,P) | None
+        return_features (ArmaganDegisiklikler): also return the shared BiLSTM features (B,L,2H) for auxiliary heads.
+        """
         z = self.encode(x)
         B, L, _ = z.shape
         tab = self.head(z).view(B, L, self.num_strings, self.n_classes)
         off = self.offset_head(z) if self.offset_head is not None else None
         pon = self.pitch_onset_head(z) if self.pitch_onset_head is not None else None
+        if return_features:
+            return tab, self.onset_head(z), off, pon, z
         return tab, self.onset_head(z), off, pon
 
 

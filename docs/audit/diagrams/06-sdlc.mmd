@@ -1,0 +1,28 @@
+%% Diyagram 6 — SDLC dongusu (bu projedeki gercek karsiliklari)
+%% Yesil = tamam · Sari = kismen · Kirmizi = eksik
+flowchart LR
+    R["<b>1. REQUIREMENTS</b><br/>pptx 15 slayt (kapsam, kapsam-disi,<br/>minimum basari)<br/><b>KISMEN</b> — ID'li izleme matrisi yok"]
+    PL["<b>2. PLANNING</b><br/>devlog/README.md katmanli yol haritasi<br/>+ sunum Phase 0-5<br/><b>TAMAM</b>"]
+    D["<b>3. DESIGN</b><br/>NoteEvent ortak sema, katmanli<br/>geriye donuk uyumluluk, sicak baslatma<br/><b>KISMEN</b> — parmak/ritim alani yok"]
+    I["<b>4. IMPLEMENTATION</b><br/>gtab/ kutuphane + scripts/ calistirilabilir<br/>11.853 satir, 63 modul<br/><b>TAMAM</b>"]
+    T["<b>5. TESTING</b><br/>170 test (8 dosya), 17 protokol denetimi,<br/>cikarim parmak izi<br/><b>KISMEN</b> — yalniz son 4 fazda;<br/>gaps_score.align() testsiz"]
+    V["<b>6. VALIDATION</b><br/>katman bazli metrik, oracle/uctan uca ayrimi,<br/>assert_comparable grup korumasi<br/><b>KISMEN</b> — GuitarSet'te bagimsiz test YOK"]
+    IN["<b>7. INTEGRATION</b><br/>moduller arasi saglam;<br/>urun duzeyi IKI DALDA IKI KEZ cozulmus<br/><b>EKSIK</b>"]
+    DP["<b>8. DEPLOYMENT / DELIVERY</b><br/>CLI var (iki tane), MusicXML cikti [baska dalda]<br/>main DONMUS, surum etiketi yok<br/><b>EKSIK</b>"]
+    M["<b>9. MAINTENANCE</b><br/>devlog 'acik riskler' bolumleri,<br/>ProtocolError/TranscribeError<br/><b>KISMEN</b> — ISSUE_REGISTER ilk toplu envanter"]
+
+    R --> PL --> D --> I --> T --> V --> IN --> DP --> M
+    M -. "ogrenilen -> yeni katman" .-> R
+
+    GATE["<b>KAPI (projeye ozgu)</b><br/>'Ciddi iyilesme olcutu devlog'da<br/><b>ONCEDEN</b> yazilir; saglanmadan<br/>bir sonraki kademeye GECILMEZ'<br/>CONTRIBUTING.md kural 3"]
+    GATE -.- V
+    GATE -.- PL
+
+    classDef ok fill:#2d5016,color:#fff
+    classDef part fill:#5c4a00,color:#fff
+    classDef bad fill:#4a1515,color:#fff
+    classDef note stroke-width:3px
+    class PL,I ok
+    class R,D,T,V,M part
+    class IN,DP bad
+    class GATE note

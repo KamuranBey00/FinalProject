@@ -1,0 +1,84 @@
+%% Diyagram 7 — Egitim / validation / test akisi
+%% Kaynak: gtab/evaluation/protocol.py (266 satir, 25 test) + selection.py + scripts/train/*
+%% KIRMIZI KALIN KUTU = protokolce YASAK yol
+flowchart TD
+    subgraph HAZ["1. VERI HAZIRLAMA"]
+        H1["Ham veri<br/>GuitarSet (mirdata) · GAPS (HF)"]
+        H2["scripts/data/build_*.py<br/>-> data/cache/*.npz<br/><i>CQT + etiket onbellegi</i>"]
+        H3["protocol.gaps_training_files()<br/><i>split dogrular + karantina 395_w41wc duser</i>"]
+    end
+
+    subgraph SPLIT["2. SPLIT ROLLERI (protocol.py)"]
+        S1["<b>EGITIM</b><br/>train + train_comp (GuitarSet 00-04, 150+150)<br/>gaps_fit (202 kayit, 149 icraci)<br/><i>may_train = True</i>"]
+        S2["<b>VALIDATION</b><br/>val + val_comp (GuitarSet 05, 30+30)<br/>gaps_val (28 kayit, 22 icraci)<br/><i>may_select = may_report = True</i><br/><b>BAGIMSIZ TEST DEGIL</b>"]
+        S3["<b>BAGIMSIZ TEST</b><br/>gaps_test (30 kayit, 27 icraci)<br/><i>may_select = False · may_report = True</i><br/>icraci-ayrik"]
+        S4["<b>KESIF</b><br/>val_half_a / val_half_b (14 / 16)<br/><i>may_select = may_report = False</i>"]
+        S5["<b>KULLANILMAZ</b><br/>gaps_skipped (39 kayit)<br/><i>test icracilariyla ortusen train kayitlari</i>"]
+    end
+
+    subgraph EGT["3. EGITIM (kullanici calistirir)"]
+        E1["assert_may_train(splits)<br/><i>val/gaps_test eklenirse ProtocolError</i>"]
+        E2["scripts/train/train_onset.py<br/>init = mevcut checkpoint (sicak baslatma)<br/>YENI AD: --ckpt yeni.pt (uzerine yazma YOK)"]
+        E3["scripts/train/train_edition_seq.py<br/><i>yalniz gaps_fit; 30 epoch, seed 1, ~2 dk</i>"]
+    end
+
+    subgraph SEC["4. CHECKPOINT SECIMI (selection.py)"]
+        C1["<b>EpochSelector(selection_split)</b><br/><i>kurucu protokolu dogrular</i>"]
+        C2["Her epoch: egitim kaybi + dogrulama olcutu<br/><i>checkpoint yalniz olcut iyilesirse yazilir</i>"]
+        C3["<b>epoch 0 da yarisir</b><br/>kept_initial() -> hicbiri gecemezse TABAN KORUNUR<br/><i>tabcrnn_gtab.pt'ta fiilen yasandi</i>"]
+        C4["min_delta (gurultu esigi) +<br/>patience (early stopping) +<br/>overfitting(window=3) uyarisi"]
+    end
+
+    subgraph KAL["5. KALIBRASYON (alan ici)"]
+        K1["pitch_eval.calibrate<br/><i>esik x onset x kural izgarasi</i>"]
+        K2["val -> GuitarSet ayari<br/>gaps_val -> GAPS ayari<br/><i>IKI ALANIN SAYILARI KARISTIRILAMAZ</i>"]
+        K3["--save-cal -> *.cal.json<br/><i>tam kalibrasyon ~1 saat;<br/>--load-cal ile saniyeler</i>"]
+    end
+
+    subgraph HTA["6. HATA ANALIZI (egitim yok)"]
+        A1["diagnose_pitch (kacan/hayalet kirilimi)<br/>diagnose_strings (tel karisikligi)<br/>eval_playability (fiziksel ihlal)"]
+        A2["<b>YALNIZ DOGRULAMA SETINDE</b><br/>val · val_comp · gaps_val"]
+    end
+
+    subgraph RAP["7. RAPORLAMA"]
+        R1["assert_may_report(split)<br/>report_label(split) ZORUNLU"]
+        R2["d1_baseline.json'a yeni satir<br/><i>deger + split + split cinsi + birim + grup</i>"]
+        R3["assert_comparable(a, b)<br/><i>farkli grup kiyaslanamaz</i>"]
+        R4["<b>gaps_test: FAZ KAPANISINDA BIR KEZ</b>"]
+    end
+
+    REG["<b>REGRESYON KAPISI</b><br/>unittest (170 test) +<br/>check_protocol (17) +<br/>check_inference_regression (parmak izi)"]
+
+    FORBID["<b>YASAK YOLLAR (koda bagli)</b><br/>· gaps_test ile esik/epoch secimi<br/>&nbsp;&nbsp;-> assert_may_select -> ProtocolError<br/>· val/gaps_val ile egitim<br/>&nbsp;&nbsp;-> assert_may_train hatasi<br/>· val_half ile 'yarida sec, yarida test et'<br/>&nbsp;&nbsp;-> may_report = False<br/>· tanimsiz split adi -> hata"]
+
+    H1 --> H2 --> H3 --> S1
+    H3 --> S2
+    H3 --> S3
+    H3 --> S4
+    H3 --> S5
+    S1 --> E1 --> E2
+    E1 --> E3
+    E2 --> C1
+    E3 --> C1
+    S2 --> C1
+    C1 --> C2 --> C3 --> C4
+    C4 --> K1
+    S2 --> K2
+    K1 --> K2 --> K3
+    K3 --> A1
+    S2 --> A2 --> A1
+    A1 --> REG --> R1
+    S3 --> R4
+    R1 --> R2 --> R3
+    R4 --> R1
+    A1 -. "hipotez -> yeni deney" .-> E2
+
+    FORBID -. "engeller" .- C1
+    FORBID -. "engeller" .- K2
+    FORBID -. "engeller" .- E1
+    FORBID -. "engeller" .- A2
+
+    classDef bad fill:#4a1515,color:#fff,stroke-width:3px
+    classDef test fill:#2d5016,color:#fff
+    class FORBID,S5 bad
+    class S3,R4 test

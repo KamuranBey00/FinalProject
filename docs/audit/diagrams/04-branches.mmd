@@ -1,0 +1,73 @@
+%% Diyagram 4 — Branch ve katman mimarisi
+%% Kaynak: git diff --stat HEAD origin/katman-5-ritim (104 dosya), git log, git ls-tree
+flowchart TD
+    MAIN["<b>main</b> @ 9fe0b53<br/>Merge remote placeholder repo history<br/><i>9 commit'te DONMUS - tum is dallarda</i>"]
+    BASE["<b>ORTAK ATA</b> @ 72295e6<br/>Katman 3.13: GAPS partisyon TAB +<br/>parmak etiketleri, klasik edisyon onerisi"]
+
+    subgraph CUR["DAL A - Armagan-katman-4 @ 546c7bd (AKTIF, 5 commit ileri)"]
+        CU1["83773a9 · Katman 4 Faz 0<br/>olcum ve test protokolu"]
+        CU2["b988d82 · Katman 4 Faz 1<br/>teknik kapsami + etiket envanteri"]
+        CU3["b133c4e · P1-P2 taban + teknik arastirmasi arsivi"]
+        CU4["e25b5fa · Faz 2A kontur kodu korundu"]
+        CU5["546c7bd · P3 cakisma-duyarli<br/>calinabilirlik metrikleri"]
+        CUX["?? scripts/transcribe.py<br/><i>TAKIPSIZ - 221 satir, yedegi YOK</i>"]
+    end
+
+    subgraph K5["DAL B - origin/katman-5-ritim @ 3f1f47d (2 commit ileri)"]
+        K51["37cbf39 · Katman 3.13 temizlik<br/>archive/ + checkpoints/archive/"]
+        K52["3f1f47d · Katman 5<br/>ritim + kuantalama + olculu TAB"]
+    end
+
+    subgraph ONLYA["YALNIZ DAL A'DA (birlestirmede KORUNMALI)"]
+        OA1["evaluation/protocol.py · selection.py<br/>baselines.py · fingerprint.py · technique_eval.py"]
+        OA2["decoding/playability.py (327 satir)"]
+        OA3["data/contour.py (305) · scripts/data/build_contour.py"]
+        OA4["scripts/eval/ check_protocol ·<br/>check_inference_regression · eval_playability ·<br/>inventory_technique · probe_gaps_f0"]
+        OA5["<b>tests/ TAMAMI</b><br/>8 dosya, 170 test (170/170 gecti)"]
+        OA6["docs/baselines/ d1_baseline.json +<br/>inference_fingerprint.json"]
+        OA7["devlog README15-18 + archive/"]
+    end
+
+    subgraph ONLYB["YALNIZ DAL B'DE (birlestirmenin KAZANCI)"]
+        OB1["render/musicxml.py (128) · render/score.py (94)<br/><i>gidis-donus birebir 1.0000</i>"]
+        OB2["gtab/pipeline.py (81)<br/>scripts/app/transcribe.py (50)"]
+        OB3["decoding/rhythm.py (131) · beat_dbn.py (84)"]
+        OB4["models/beat_net.py (68) · rhythm_net.py (104)<br/>data/rhythm_labels.py (104)"]
+        OB5["evaluation/rhythm_metrics.py (110)"]
+        OB6["scripts: build_rhythm · build_beat_feats ·<br/>train_beat · train_rhythm_q · eval_rhythm · eval_score"]
+        OB7["<b>docs/SOZLUK.md</b> (383 satir)"]
+        OB8["checkpoints/beat_net.pt · rhythm_q.pt"]
+        OB9["archive/ + checkpoints/archive/ (14 dosya tasindi)"]
+    end
+
+    subgraph CONF["CAKISACAK DOSYALAR (elle cozulmeli)"]
+        CF1["<b>docs/devlog/README15.md</b><br/>A: Katman 4 Faz 0 · B: Katman 5 ritim<br/><i>AYNI AD, FARKLI ICERIK</i>"]
+        CF2["<b>docs/devlog/README16.md</b><br/>A: P1 parmaklandirma · B: Katman 5 MusicXML<br/><i>AYNI AD, FARKLI ICERIK</i>"]
+        CF3["decoding/edition.py (212 satir fark)<br/><i>B log-lineeri archive/'a tasidi<br/>-> tests/test_edition.py KIRILIR</i>"]
+        CF4["data/gaps_score.py (20 satir)<br/><i>B: align -> order, lens, score_x<br/>9 kayitta birebir dogrulandi</i>"]
+        CF5["models/inference.py (8) ·<br/>scripts/eval/eval_edition.py (34)"]
+        CF6["CLAUDE.md (42) · CONTRIBUTING.md (59) ·<br/>README.md (85)<br/><i>ikisi de eski - tek elden yazilmali</i>"]
+    end
+
+    subgraph EKS["EKSIK ENTEGRASYONLAR"]
+        EK1["<b>IKI RAKIP GIRIS NOKTASI</b><br/>scripts/transcribe.py (A, ASCII TAB + parmak)<br/>vs pipeline.py (B, MusicXML + ritim)"]
+        EK2["NoteEvent parmak/ritim alani YOK<br/><i>her iki taraf yan kanal kullaniyor</i>"]
+        EK3["B'de tests/ ve protokol kapilari YOK<br/><i>train_beat/train_rhythm_q gaps_files()<br/>dogrudan cagiriyor</i>"]
+        EK4["data/cache/rhythm + beat_feats<br/>BU MAKINEDE YOK (808 MB)"]
+    end
+
+    MAIN --> BASE
+    BASE --> CU1 --> CU2 --> CU3 --> CU4 --> CU5
+    BASE --> K51 --> K52
+    CU5 --- CUX
+
+    CU5 --> ONLYA
+    K52 --> ONLYB
+    CU5 -. "cakisma" .-> CONF
+    K52 -. "cakisma" .-> CONF
+    CONF --> EKS
+
+    classDef k5 stroke-dasharray: 6 4
+    classDef danger stroke-width:3px
+    class K51,K52,OB1,OB2,OB3,OB4,OB5,OB6,OB7,OB8,OB9 k5
+    class CF1,CF2,CF3,EK1 danger

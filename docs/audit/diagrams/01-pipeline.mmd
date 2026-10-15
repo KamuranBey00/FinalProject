@@ -1,0 +1,90 @@
+%% Diyagram 1 — Ana Audio-to-TAB pipeline
+%% Her kutu: bilesen adi / dosya veya model / kisa gorev
+%% Duz cizgi = mevcut dalda (Armagan-katman-4) calisiyor
+%% Kesikli cizgi = yalniz origin/katman-5-ritim dalinda var
+%% Kaynak: gtab/ ve scripts/ gercek fonksiyon cagrilari (import grafi ile dogrulandi)
+flowchart TD
+    WAV["<b>1. SES GIRISI</b><br/>.wav / .mp3 / .flac<br/><i>kullanici dosyasi</i>"]
+    LOAD["<b>2. SES YUKLEME</b><br/>data/features.py : load_audio<br/><i>librosa, 22050 Hz mono'ya indirir</i>"]
+    CQT["<b>3. OZELLIK CIKARIMI</b><br/>data/features.py : compute_cqt<br/><i>log-CQT, 192 bin, 24 bin/oktav, hop 512</i>"]
+    NORM["<b>4. NORMALIZASYON</b><br/>data/torch_dataset.py : _normalize<br/><i>egitimdeki ayni olcek</i>"]
+
+    HS["<b>5a. HARMONIK ISTIFLEME</b><br/>models/nets.py : HarmonicStack<br/><i>spektrumun kaydirilmis kopyalari = kanal</i>"]
+    BODY["<b>5b. CNN GOVDESI</b><br/>models/nets.py : _backbone + ResBlock<br/><i>yerel spektrum desenleri</i>"]
+    LSTM["<b>5c. BiLSTM</b><br/>models/nets.py : TabCRNN.encode<br/><i>2 katman x 128, zamansal baglam</i>"]
+
+    H1["<b>6a. TAB KAFASI</b><br/>TabCRNNOnset<br/><i>6 tel x 26 sinif, tel basina softmax</i>"]
+    H2["<b>6b. ONSET KAFASI</b><br/>TabCRNNOnset<br/><i>tel basina vurus olasiligi</i>"]
+    H3["<b>6c. OFFSET KAFASI</b><br/>TabCRNNOnset<br/><i>notanin bittigi kare</i>"]
+    H4["<b>6d. PERDE-ONSET KAFASI</b><br/>TabCRNNOnset<br/><i>SECILEN onset kaynagi (cal.json)</i>"]
+
+    CAL["<b>7. KALIBRASYON</b><br/>evaluation/pitch_eval.py : load_selection<br/><i>tabcrnn_deep2.cal.json, alan: val / gaps_val</i>"]
+    RISE["<b>8. ENERJI YUKSELISI</b><br/>decoding/viterbi.py : energy_rise<br/><i>CQT'de dB sicramasi = yeniden vurus kaniti</i>"]
+    SEG["<b>9. NOTA BULMA</b><br/>decoding/viterbi.py : segment<br/><i>onset tabanli; tepe, refrakter, yedek,<br/>histerezis, yeniden vurus kurallari</i>"]
+
+    LAT["<b>10. TEL/PERDE ATAMASI</b><br/>decoding/transitions.py :<br/>build_lattice + decode_lattice<br/><i>kafes Viterbi; w_transition=0 secildi</i>"]
+    TM["<b>transitions.npz</b><br/><i>ogrenilen gecis modeli (katkisi 0 olculdu)</i>"]
+
+    NE["<b>11. ORTAK NOTA SEMASI</b><br/>core/note_event.py : NoteEvent<br/><i>onset, offset, pitch, string, fret, technique<br/>PARMAK ve RITIM ALANI YOK</i>"]
+
+    ORD["<b>12a. AKOR GRUPLAMA</b><br/>decoding/edition.py : order_notes<br/><i>onset &lt;= 30 ms = akor, perde artan</i>"]
+    EN["<b>12b. PARMAKLANDIRMA</b><br/>models/edition_net.py : EditionNet<br/><i>BiLSTM; tel + perde + parmak (ses gormez)</i>"]
+    RC["<b>12c. AKOR ICI TEL TEKLIGI</b><br/>models/edition_net.py : resolve_chords<br/><i>bir tel = bir nota (parmak karsiligi YOK)</i>"]
+
+    PL["<b>13. CALINABILIRLIK OLCUMU</b><br/>decoding/playability.py<br/><i>cakisma, aciklik, ters sira, barre, pozisyon<br/>YALNIZ SAYAR, kisit uygulamaz</i>"]
+
+    BN["<b>14a. VURUS AKTIVASYONU</b><br/>models/beat_net.py : BeatNet<br/><i>donmus deep2 temsili -> vurus/olcu basi</i>"]
+    DBN["<b>14b. VURUS COZUMLEME</b><br/>decoding/beat_dbn.py : dbn_decode<br/><i>bar-pointer DBN; kullanici BPM +-35% + olcu imi</i>"]
+    RQ["<b>15. KUANTALAMA</b><br/>models/rhythm_net.py : RhythmNet (1q)<br/><i>1/24 vurus izgarasi; oracle IOI 0.933</i>"]
+    MEAS["<b>16. OLCU OLUSTURMA</b><br/>render/score.py : build_measures<br/><i>olcu cizgisi, nota degeri, bag, ucleme</i>"]
+
+    ASCII["<b>17a. ASCII TAB</b><br/>decoding/decode.py : render_ascii_tab<br/><i>6 telli metin TAB (parmak gostermez)</i>"]
+    TBL["<b>17b. NOTA TABLOSU</b><br/>scripts/transcribe.py : note_table<br/><i>zaman, MIDI, nota adi, tel, perde, parmak</i>"]
+    MXML["<b>17c. MUSICXML</b><br/>render/musicxml.py : write_musicxml<br/><i>score-partwise 4.0; P1 nota + P2 TAB portresi</i>"]
+    MUSE["<b>18. MUSESCORE 4</b><br/><i>gorsel dogrulama (HENUZ YAPILMADI)</i>"]
+
+    CLI1["<b>CLI A</b><br/>scripts/transcribe.py<br/><i>TAKIPSIZ; --domain, --fingering</i>"]
+    CLI2["<b>CLI B</b><br/>scripts/app/transcribe.py + gtab/pipeline.py<br/><i>--bpm --meter --mode</i>"]
+
+    WAV --> LOAD --> CQT --> NORM --> HS --> BODY --> LSTM
+    LSTM --> H1
+    LSTM --> H2
+    LSTM --> H3
+    LSTM --> H4
+    CQT --> RISE
+    CAL --> SEG
+    H1 --> SEG
+    H2 --> SEG
+    H3 --> SEG
+    H4 --> SEG
+    RISE --> SEG
+    SEG --> LAT
+    H1 --> LAT
+    TM --> LAT
+    LAT --> NE
+    NE --> ORD --> EN --> RC --> NE
+    RC --> PL
+    NE --> PL
+    NE --> ASCII
+    NE --> TBL
+    CLI1 -.- ASCII
+    CLI1 -.- TBL
+
+    NORM -.-> BN
+    LSTM -.-> BN
+    BN -.-> DBN
+    DBN -.-> RQ
+    NE -.-> RQ
+    RQ -.-> MEAS
+    MEAS -.-> MXML
+    NE -.-> MXML
+    RC -.-> MXML
+    MXML -.-> MUSE
+    CLI2 -.- MXML
+
+    PL -. "PLAN: P4 akor ici parmak kisiti" .-> RC
+    NE -. "PLAN: P6 parmak alani" .-> ASCII
+
+    classDef k5 stroke-dasharray: 6 4
+    classDef plan stroke-dasharray: 2 3
+    class BN,DBN,RQ,MEAS,MXML,MUSE,CLI2 k5

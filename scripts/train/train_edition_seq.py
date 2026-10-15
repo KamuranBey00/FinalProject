@@ -20,15 +20,15 @@ from gtab.data.gaps import GAPS_TAB_DIR, gaps_files
 from gtab.decoding.edition import label_sequence
 from gtab.models.edition_net import INSTR, EditionNet, note_features, position_features, predict
 from gtab.paths import ckpt_path
-from gtab.utils import get_device, set_seed
+from gtab.utils import get_device, guard_new_checkpoint, set_seed
 
 CHUNK = 256
 
 
-def load(files):
+def load(files, tab_dir=GAPS_TAB_DIR):
     out = []
     for f in files:
-        lf = os.path.join(GAPS_TAB_DIR, os.path.basename(f))
+        lf = os.path.join(tab_dir, os.path.basename(f))
         if os.path.exists(lf):
             notes, chord, s, fr, g = label_sequence(lf)
             pidx, cont, valid = note_features(notes, chord)
@@ -84,10 +84,12 @@ def evaluate(net, data, device):
     return so / max(sn, 1), fo / max(fn, 1)
 
 
-def main(out, epochs, lr, bs, seed):
+def main(out, epochs, lr, bs, seed, overwrite=False, tab_dir=GAPS_TAB_DIR):
+    guard_new_checkpoint(ckpt_path(out), overwrite)   # default --out is the live edition_seq.pt
     set_seed(seed); device = get_device(); rng = np.random.default_rng(seed)
     fit_f, val_f = gaps_files("gaps_train")
-    fit, val = load(fit_f), load(val_f)
+    fit, val = load(fit_f, tab_dir), load(val_f, tab_dir)
+    print(f"etiketler: {tab_dir}")
     print(f"gaps_fit {len(fit)} kayit ({sum(len(d['notes']) for d in fit)} nota) | gaps_val {len(val)} kayit | {device}")
     net = EditionNet().to(device)
     opt = torch.optim.Adam(net.parameters(), lr=lr)
@@ -116,5 +118,8 @@ if __name__ == "__main__":
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--overwrite", action="store_true", help="--out zaten varsa bilerek ez (varsayilan: dur)")
+    ap.add_argument("--tab-dir", default=GAPS_TAB_DIR,
+                    help="etiket klasoru (ArmaganDegisiklikler: data/cache/gaps_tab_rec = tekrar yapisi kurtarilmis 236 kayit)")
     a = ap.parse_args()
-    main(a.out, a.epochs, a.lr, a.batch_size, a.seed)
+    main(a.out, a.epochs, a.lr, a.batch_size, a.seed, a.overwrite, a.tab_dir)

@@ -1,0 +1,91 @@
+%% Diyagram 5 — ORIJINAL ROADMAP ve gerceklesen durum
+%% ORIJINAL KAYNAK 1 (akademik, Eylul 2026): inputs/Klasik_Gitar_AI_Proje_Sunumu.pptx slayt 10 (Phase 0-5) + slayt 14 (7 adim)
+%% ORIJINAL KAYNAK 2 (muhendislik, 1 Ekim 2026): docs/devlog/README.md @ commit 99b82cb (Katman 0-6)
+%% Duz cizgi = orijinal planlanan sira · Kalin kesikli = ZORUNLU teknik bagimlilik
+%% [x] tamamlandi · [~] kismen/dogrulama gerekiyor · [ ] yapilmadi · [B] baska dalda
+flowchart TD
+    subgraph SUNUM["ORIJINAL PLAN 1 — SUNUM FAZLARI (pptx slayt 10, Eylul 2026)"]
+        direction LR
+        P0["<b>Phase 0</b><br/>Unified annotation /<br/>data pipeline<br/><b>[x]</b>"]
+        P1["<b>Phase 1</b><br/>Monophonic baseline:<br/>pitch + onset<br/><b>[x]</b>"]
+        P2["<b>Phase 2</b><br/>Guitar-specific baseline:<br/>TabCNN + GuitarSet<br/><b>[x]</b>"]
+        P3["<b>Phase 3</b><br/>Polyphonic baseline:<br/>genel AMT ile kiyas<br/><b>[~]</b> polifoni yapildi,<br/>Basic Pitch kiyasi YOK"]
+        P4["<b>Phase 4</b><br/>SynthTab Nylon pretraining<br/>-> GuitarSet/GAPS fine-tune<br/><b>[~]</b> GAPS yapildi,<br/><b>SynthTab YAPILMADI</b>"]
+        P5["<b>Phase 5</b><br/>Rhythm + playability;<br/>sonra technique + fingering<br/><b>[~]</b> ritim [B],<br/>fingering [x], technique [ ]"]
+        P0 --> P1 --> P2 --> P3 --> P4 --> P5
+    end
+
+    subgraph ORJ["ORIJINAL PLAN 2 — KATMANLI YOL HARITASI (docs/devlog/README.md @ 99b82cb, 1 Ekim 2026)"]
+        K0["<b>Katman 0 — Temel</b><br/>config, instrument, note_event, get_data<br/>'Degistirmesi pahali 4 karar'<br/><b>[x] BITTI</b>"]
+        K1["<b>Katman 1 — Ozellik + veri yukleyici</b><br/>Ses -> CQT; GuitarSet data loader;<br/>egitim/dogrulama ayrimi<br/><b>[x] BITTI</b>"]
+        K2["<b>Katman 2 — Monofonik uctan uca</b><br/>PLAN: CREPE ile pitch -> NoteEvent -> naif tab<br/>GERCEK: PitchCNN egitildi (CREPE kullanilmadi)<br/><b>[x] BITTI</b> — kare F1 0.853"]
+        K3["<b>Katman 3 — Gercek string/fret</b><br/>GuitarSet tel etiketleriyle TabCNN/CRNN<br/><b>[x] BITTI</b> — ama 9 ALT KATMANA buyudu (asagida)"]
+        K4["<b>Katman 4 — Teknikler</b><br/>Surekli F0 + onset zarfi -> BEND,<br/>slide, hammer/pull, vibrato<br/>'Senin asil hedefin'<br/><b>[ ] BEKLEMEDE</b> — teknik etiketi YOK"]
+        K5["<b>Katman 5 — Ritim + render</b><br/>PLAN: tempo/beat, kuantalama,<br/><b>AlphaTab</b> ile bend/slide sembollu tab<br/>GERCEK: <b>MusicXML</b> secildi, AlphaTab ertelendi<br/><b>[B] BASKA DALDA TAMAM</b>"]
+        K6["<b>Katman 6 — Zorlastirma</b><br/>Polifoni (akorlar), distortion dayanikliligi,<br/>farkli gitarlar/akortlar<br/><b>ALT ASAMA TANIMI YOK</b> (6.1/6.2/6.3 hic yazilmamis)<br/><b>[~] polifoni ONE ALINDI</b>, distortion + akort [ ]"]
+        K0 --> K1 --> K2 --> K3 --> K4 --> K5 --> K6
+    end
+
+    subgraph GERCEK3["GERCEKLESEN — KATMAN 3'UN ALT KATMANLARI (orijinal planda YOK, ihtiyaca gore acildi)"]
+        L35["<b>3.5</b> CRNN (CNN+BiLSTM)<br/>README5 · tab F1 0.634<br/><b>[x]</b>"]
+        L36["<b>3.6</b> Viterbi tel atamasi (el yapimi)<br/>README6 · gercek veride KATKI YOK<br/><b>[x] RET</b>"]
+        L36b["<b>3.6b</b> Ogrenilen gecis modeli<br/>README7 · 0.664; guclu modelde katkisiz<br/><b>[x] RET</b>"]
+        L37["<b>3.7</b> Veri genisletme (comp + cogaltma)<br/>README8 · 0.667; cogaltma -0.06 RET<br/><b>[x]</b>"]
+        L38["<b>3.8</b> Klasik gitar alan uyarlamasi<br/>README9 · alt adimlar 3.8a-3.8e<br/><b>[~] 3.8d (SynthTab) YAPILMADI</b>"]
+        L39["<b>3.9</b> Tel/perde sesi: onset + harmonik istifleme<br/>README10 · 0.739 · oracle tel 0.850<br/><b>[x]</b>"]
+        L310["<b>3.10</b> Polifonide perde (hayalet + kacan)<br/>README11 · 0.760 · <b>Katman 6'nin isi one alindi</b><br/><b>[x]</b> val_comp olcutu eksik"]
+        L311["<b>3.11</b> Hizli tekrarlar (tremolo)<br/>README12 · 0.769 · GAPS &lt;100 ms ACIK<br/><b>[x]</b>"]
+        L312["<b>3.12</b> Akustik katman: kapasite mi veri mi<br/>README13 · <b>tabcrnn_deep2.pt = TABAN</b> 0.777<br/><b>[x] KAPANDI</b>"]
+        L313["<b>3.13</b> GAPS partisyon TAB + parmak<br/>README14/16/17/18 · edition_seq.pt<br/><b>[~] P1-P3 bitti, P4-P6 var</b>"]
+        L35 --> L36 --> L36b --> L37 --> L38 --> L39 --> L310 --> L311 --> L312 --> L313
+    end
+
+    subgraph GERCEK4["GERCEKLESEN — KATMAN 4 FAZLARI (README15'te tanimlandi)"]
+        F0["<b>Faz 0</b> Olcum ve test protokolu<br/>80 test, protokol kapilari, D1 tablosu<br/><b>[x]</b>"]
+        F1["<b>Faz 1</b> Teknik kapsami + etiket envanteri<br/>SONUC: <b>teknik etiketi YOK</b><br/><b>[x] -> Katman 4 beklemeye alindi</b>"]
+        F2["<b>Faz 2A</b> Surekli F0 altyapisi<br/>contour.py, 29 test, 18 MB onbellek<br/><b>[x] arsivlendi</b>"]
+        F3["<b>Faz 3</b> Kural tabanli tespit + sozde etiket<br/><b>[ ]</b>"]
+        F4["<b>Faz 4</b> Mikrofondan teknik siniflandirici<br/><b>[ ]</b>"]
+        F5["<b>Faz 5</b> Klasik gitarda dogrulama (elle etiket)<br/><b>[ ]</b>"]
+        F6["<b>Faz 6</b> Entegrasyon + Katman 4 kapanisi<br/><b>[ ]</b>"]
+        F0 --> F1 --> F2 --> F3 --> F4 --> F5 --> F6
+    end
+
+    subgraph GERCEK313["GERCEKLESEN — 3.13 PARMAKLANDIRMA FAZLARI (README16 §7)"]
+        PP1["<b>P1</b> Inceleme + yeniden planlama<br/><b>[x]</b>"]
+        PP2["<b>P2</b> Test altyapisi + taban dogrulamasi<br/>20 test; gaps_val birebir<br/><b>[x]</b>"]
+        PP3["<b>P3</b> Calinabilirlik denetimi (yalniz olcum)<br/>41 test; model %8.52 cakisma, editor %0<br/><b>[x]</b>"]
+        PP4["<b>P4</b> Akor ici parmak kisiti + el pozisyonu<br/>Hedef: cakisma 22 -> 0<br/><b>[ ] SIRADA</b>"]
+        PP5["<b>P5</b> Aciklanabilir optimizasyon (DP/beam)<br/>BiLSTM ile kiyas<br/><b>[ ]</b>"]
+        PP6["<b>P6</b> Entegrasyon: NoteEvent'e parmak,<br/>TAB render, uzman degerlendirmesi<br/><b>[ ]</b>"]
+        PP1 --> PP2 --> PP3 --> PP4 --> PP5 --> PP6
+    end
+
+    subgraph GERCEK5["GERCEKLESEN — KATMAN 5 ADIMLARI (yalniz origin/katman-5-ritim)"]
+        A0a["<b>Adim 0a</b> Gercek ritim etiketleri<br/>GAPS 143 + GuitarSet 360; syncpoint 22.9 ms<br/><b>[B]</b>"]
+        A0b["<b>Adim 0b</b> Egitimsiz taban<br/>vurus F 0.444, kuantalayici 0.821 -> IKISI DE YETMEDI<br/><b>[B]</b>"]
+        A1q["<b>Adim 1q</b> Baglamli kuantalayici (RhythmNet)<br/>oracle IOI <b>0.933</b> >= 0.90 <b>KABUL</b><br/><b>[B]</b>"]
+        A1b["<b>Adim 1b</b> Ogrenilen vurus + olcu basi (BeatNet+DBN)<br/>vurus F 0.631 &lt; 0.75 ESIK SAGLANMADI<br/>-> <b>yari otomatik mod</b> (kullanici BPM + olcu)<br/><b>[B]</b>"]
+        A2["<b>Adim 2</b> Olculu TAB cikti (MusicXML)<br/>gidis-donus <b>1.0000</b>; olcu ici konum 0.611<br/><b>[B] KAPANDI</b>"]
+        A3["<b>Sirada</b> Gorselleştirme: MuseScore gorsel kontrol +<br/>AlphaTab web goruntuleyici<br/><b>[ ]</b>"]
+        A0a --> A0b --> A1q --> A1b --> A2 --> A3
+    end
+
+    K3 --> L35
+    K4 --> F0
+    L313 --> PP1
+    K5 --> A0a
+    L312 ==>|"ZORUNLU: ritim deep2 notalarina dayaniyor<br/>kapsam 0.810 tavan"| A0a
+    L312 ==>|"ZORUNLU: edisyon modeli nota girdisi ister"| PP1
+    L313 ==>|"ZORUNLU: MusicXML fingering alani<br/>edition_seq.pt'tan geliyor"| A2
+    L310 -. "Katman 6'nin polifoni isi<br/>3.10-3.12'de ONE ALINDI" .-> K6
+    F1 -. "teknik etiketi yok -> emek<br/>parmaklandirmaya kaydirildi" .-> PP1
+
+    classDef done fill:#2d5016,color:#fff
+    classDef part fill:#5c4a00,color:#fff
+    classDef todo fill:#4a1515,color:#fff
+    classDef other stroke-dasharray: 6 4
+    class K0,K1,K2,K3,P0,P1,P2,L35,L37,L39,L310,L311,L312,F0,F1,F2,PP1,PP2,PP3 done
+    class P3,P4,P5,K6,L38,L313 part
+    class K4,F3,F4,F5,F6,PP4,PP5,PP6,A3 todo
+    class K5,A0a,A0b,A1q,A1b,A2 other

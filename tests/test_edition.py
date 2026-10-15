@@ -29,7 +29,9 @@ from gtab.paths import CACHE_DIR, ckpt_path
 CKPT = Path(ckpt_path("edition_seq.pt"))
 GAPS_TAB = Path(CACHE_DIR) / "gaps_tab"
 HAVE_TORCH = importlib.util.find_spec("torch") is not None
-HAVE_CKPT = HAVE_TORCH and CKPT.exists()
+# eval_edition -> pitch_eval -> mir_eval: without mir_eval the gated tests must skip, not crash
+HAVE_MIR_EVAL = importlib.util.find_spec("mir_eval") is not None
+HAVE_CKPT = HAVE_TORCH and HAVE_MIR_EVAL and CKPT.exists()
 HAVE_GAPS_TAB = GAPS_TAB.exists() and any(GAPS_TAB.glob("*.npz"))
 
 # README14 Adım 2b, gaps_val kolonu (geliştirme/doğrulama split'i)
@@ -141,7 +143,7 @@ class TestLogLinearDecode(unittest.TestCase):
         self.assertEqual(out[0][:2], (0, 0))
 
 
-@unittest.skipUnless(HAVE_CKPT, "torch veya checkpoints/edition_seq.pt yok")
+@unittest.skipUnless(HAVE_CKPT, "torch, mir_eval veya checkpoints/edition_seq.pt yok")
 class TestEditionNetCheckpoint(unittest.TestCase):
     """Kabul edilen dizi modeli: checkpoint yüklenir, tahmin üretir, sert kısıtlar tutar."""
 
@@ -207,7 +209,7 @@ class TestEditionNetCheckpoint(unittest.TestCase):
         self.assertEqual(int(fret[0]), 60 - STANDARD_6.tuning[5])
 
 
-@unittest.skipUnless(HAVE_CKPT and HAVE_GAPS_TAB, "torch, edition_seq.pt veya data/cache/gaps_tab yok")
+@unittest.skipUnless(HAVE_CKPT and HAVE_GAPS_TAB, "torch, mir_eval, edition_seq.pt veya data/cache/gaps_tab yok")
 class TestGapsValReproduction(unittest.TestCase):
     """
     README14 Adım 2b'nin **gaps_val** kolonunun yeniden üretimi (geliştirme split'i).

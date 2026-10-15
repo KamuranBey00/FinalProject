@@ -162,13 +162,23 @@ def render_ascii_tab(tr: Transcription, instrument=STANDARD_6, col_seconds=0.15)
     total = tr.duration()
     n_cols = max(1, int(np.ceil(total / col_seconds)) + 1)
     lanes = [["-"] * n_cols for _ in range(S)]
-    for note in tr.notes:
-        if not note.has_position():
-            continue
+    placed = sorted((n for n in tr.notes if n.has_position()), key=lambda n: n.onset)
+    for note in placed:
+        lane = lanes[note.string]
         col = min(int(round(note.onset / col_seconds)), n_cols - 1)
-        lanes[note.string][col] = str(note.fret)
+        # Fast repeats can land in an occupied cell; shift right instead of overwriting,
+        # otherwise the earlier note silently disappears from the TAB.
+        while col < len(lane) and lane[col] != "-":
+            col += 1
+        if col == len(lane):
+            for other in lanes:
+                other.append("-")
+        lane[col] = str(note.fret)
+    # Cell width = widest fret + 1, so adjacent cells always keep a "-" between them
+    # ("-7-12", not "712"). Without two-digit frets this stays 2 = the old layout.
+    width = 1 + max((len(str(n.fret)) for n in placed), default=1)
     lines = []
     for s in reversed(range(S)):
-        row = "".join(f"{c:->2}" for c in lanes[s])
+        row = "".join(c.rjust(width, "-") for c in lanes[s])
         lines.append(f"{names[s]}|{row}")
     return "\n".join(lines)

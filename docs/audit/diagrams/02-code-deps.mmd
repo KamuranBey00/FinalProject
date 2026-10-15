@@ -1,0 +1,145 @@
+%% Diyagram 2 — GERCEK import bagimliliklari (mantiksal veri akisi DEGIL)
+%% Kaynak: AST taramasi, 63 modul. Ok yonu = "A, B'yi import eder".
+%% Kesikli = yalniz origin/katman-5-ritim dalinda
+%% Dogrulanmis kural: scripts/ dosyalari birbirini import ETMEZ (tek istisna: tests.test_edition -> scripts.eval.eval_edition)
+flowchart LR
+    subgraph TEMEL["TEMEL (en cok import edilen)"]
+        CFG["gtab/config.py<br/><i>24 import</i>"]
+        PTH["gtab/paths.py<br/><i>31 import</i>"]
+        UTL["gtab/utils.py<br/><i>16 import</i>"]
+        INS["gtab/core/instrument.py<br/><i>33 import - EN COK</i>"]
+        NEV["gtab/core/note_event.py<br/><i>8 import</i>"]
+    end
+
+    subgraph VERI["VERI KATMANI"]
+        FEA["data/features.py"]
+        LAB["data/labels.py"]
+        TLB["data/tab_labels.py"]
+        TDS["data/torch_dataset.py"]
+        GS["data/guitarset.py"]
+        GAP["data/gaps.py"]
+        GSC["data/gaps_score.py"]
+        CNT["data/contour.py"]
+        SYN["data/synthtab.py"]
+        RLB["data/rhythm_labels.py"]
+    end
+
+    subgraph MODEL["MODEL KATMANI"]
+        NET["models/nets.py"]
+        LOS["models/losses.py"]
+        INF["models/inference.py"]
+        EDN["models/edition_net.py"]
+        BNT["models/beat_net.py"]
+        RNT["models/rhythm_net.py"]
+    end
+
+    subgraph DEC["COZUMLEME KATMANI"]
+        VIT["decoding/viterbi.py"]
+        DCD["decoding/decode.py"]
+        TRS["decoding/transitions.py"]
+        EDT["decoding/edition.py"]
+        PLY["decoding/playability.py"]
+        RTM["decoding/rhythm.py"]
+        BDB["decoding/beat_dbn.py"]
+    end
+
+    subgraph EVA["OLCUM KATMANI"]
+        MET["evaluation/metrics.py"]
+        PEV["evaluation/pitch_eval.py"]
+        PRO["evaluation/protocol.py"]
+        SEL["evaluation/selection.py"]
+        BAS["evaluation/baselines.py"]
+        FPR["evaluation/fingerprint.py"]
+        TEV["evaluation/technique_eval.py"]
+        RME["evaluation/rhythm_metrics.py"]
+    end
+
+    subgraph REN["RENDER + PIPELINE"]
+        SCO["render/score.py"]
+        MXW["render/musicxml.py"]
+        PIP["gtab/pipeline.py"]
+    end
+
+    FEA --> CFG
+    LAB --> CFG
+    LAB --> INS
+    LAB --> NEV
+    TLB --> CFG
+    TLB --> INS
+    TLB --> VIT
+    TDS --> TLB
+    GS --> NEV
+    GAP --> NEV
+    GAP --> PTH
+    CNT --> INS
+    SYN --> CFG
+    SYN --> INS
+
+    VIT --> CFG
+    VIT --> INS
+    VIT --> NEV
+    DCD --> CFG
+    DCD --> INS
+    DCD --> NEV
+    DCD --> LAB
+    DCD --> TLB
+    TRS --> CFG
+    TRS --> INS
+    TRS --> DCD
+    EDT --> INS
+    EDT --> TRS
+    PLY --> TRS
+
+    NET --> INS
+    LOS --> INS
+    INF --> INS
+    INF --> TDS
+    INF --> NET
+    INF --> PTH
+    EDN --> INS
+
+    MET --> INS
+    MET --> LOS
+    PEV --> CFG
+    PEV --> INS
+    PEV --> GAP
+    PEV --> TDS
+    PEV --> VIT
+    PEV --> MET
+    PEV --> INF
+    PEV --> PTH
+    PRO --> GAP
+    SEL --> PRO
+    BAS --> PRO
+    BAS --> PTH
+
+    RLB -.-> GSC
+    RTM -.-> CFG
+    BDB -.-> CFG
+    BNT -.-> CFG
+    BNT -.-> INF
+    BNT -.-> PTH
+    RNT -.-> RTM
+    RNT -.-> PTH
+    SCO -.-> GSC
+    SCO -.-> RLB
+    SCO -.-> RNT
+    MXW -.-> INS
+    MXW -.-> RNT
+    PIP -.-> CFG
+    PIP -.-> INS
+    PIP -.-> TDS
+    PIP -.-> BDB
+    PIP -.-> EDT
+    PIP -.-> TRS
+    PIP -.-> VIT
+    PIP -.-> PEV
+    PIP -.-> BNT
+    PIP -.-> EDN
+    PIP -.-> INF
+    PIP -.-> RNT
+    PIP -.-> PTH
+    PIP -.-> SCO
+
+    classDef k5 stroke-dasharray: 6 4
+    class RLB,RTM,BDB,BNT,RNT,SCO,MXW,PIP,RME k5
