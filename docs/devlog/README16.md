@@ -93,4 +93,5 @@ B) Uçtan uca (yarı otomatik, ses modu):
 - [x] Ölçü modeli + MusicXML yazıcı + gidiş-dönüş testi (birebir 1.0000, doluluk %100)
 - [x] Uçtan uca hattı (`gtab/pipeline.py`) + komut satırı (`scripts/app/transcribe.py`) + duman testi
 - [x] `eval_score`: gidiş-dönüş 1.0000, uçtan uca geçerlilik %100, ölçü içi konum 0.611 → **KAPANDI**
-- [ ] Görselleştirme: MuseScore'da TAB görünümü (kullanıcı) + ürün için AlphaTab web görüntüleyici ← **SIRADA (kullanıcı kararı)**
+- [x] Sonraki: ölçü kaydırma + tap modu → [README17](README17.md) (ölçü içi konum 0.611 → 0.864, tap "iyi")
+- [ ] Görselleştirme: AlphaTab web görüntüleyici (kullanıcı kararı)

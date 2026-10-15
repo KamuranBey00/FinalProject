@@ -98,12 +98,13 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `decoding/edition.py` | Edisyon önerisi için nota dizisi yardımcıları (akor gruplama, etiket okuma, taban parmak kuralı) |
 | `decoding/rhythm.py` | Ritim (Katman 5): başlangıç zarfları, vuruş takibi (dp / plp), ölçü başı + ölçü, kuantalama (vuruş içi bölüm seçimi) |
 | `decoding/beat_dbn.py` | Bar-pointer DBN (tempo × ölçü içi konum × ölçü 1–4; tek karelik vuruş bölgesi) + tepe seçimi tabanı |
+| `decoding/taps.py` | Tap modu (Katman 5 Adım 3): dokunuşlar → vuruşlar (gecikme, fazla / kaçan dokunuş) + ölçü fazı Viterbi'si |
 | `evaluation/metrics.py` | Ortak metrikler (P/R/F1, tab F1, onset F1) |
 | `evaluation/rhythm_metrics.py` | Ritim metrikleri: vuruş / ölçü başı F, CMLt / AMLt, tempo Acc1/2, konum ve IOI (nota değeri) doğruluğu |
 | `evaluation/pitch_eval.py` | Perde/nota değerlendirme çekirdeği: alan-içi kalibrasyon (GuitarSet→val, GAPS→gaps_val), çözümleme kuralı araması, 50/100 ms nota F1 |
 | `render/score.py` | Ölçülü TAB modeli (Katman 5 Adım 2): konumlar + ölçü başı + ölçü imi → ölçüler, bağlar, nota değerleri |
 | `render/musicxml.py` | MusicXML yazıcı (GAPS düzeni: nota portresi + parmak, TAB portresi + akort) |
-| `pipeline.py` | Uçtan uca transkripsiyon: CQT → notalar → tel/perde (ses / edisyon) → yarı otomatik vuruş → 1q → ölçüler |
+| `pipeline.py` | Uçtan uca transkripsiyon: `analyze` (CQT → notalar → tel/perde (ses / edisyon) → vuruş aktivasyonu) + `rhythm` (BPM ya da dokunuşlar → vuruşlar → 1q → ölçüler) |
 
 ### `scripts/` — çalıştırılan dosyalar
 | Dosya | Görevi |
@@ -122,8 +123,10 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `eval/diagnose_pitch.py` | Kaçan/hayalet notaların nedeni, hızlı tekrarlar, tepe görünürlüğü |
 | `eval/eval_hmm.py` | Tel ataması teşhisi + uçtan uca tab F1 (**ana GuitarSet ölçümü**) + `--demo` |
 | `eval/eval_edition.py` | Edisyon önerisi: tel uyumu, parmak (ürün sayısı), uçtan uca (deep2 notaları) |
-| `eval/eval_score.py` | Ölçülü TAB: MusicXML gidiş-dönüş + uçtan uca ölçü içi konum (Katman 5 Adım 2) |
-| `app/transcribe.py` | Ürün komutu: ses (ya da .npz) + `--bpm` + `--meter` → `.musicxml` |
+| `eval/eval_score.py` | Ölçülü TAB: MusicXML gidiş-dönüş + uçtan uca ölçü içi konum (Adım 2) + ölçü kaydırma tavanı + tap modu simülasyonu (Adım 3) |
+| `app/tap_recorder.html` | Tarayıcıda dokunuş kaydedici (tap modu): ses çal, BOŞLUK ile vuruşlar → `<kayıt>.txt` |
+| `app/transcribe.py` | Ürün komutu: ses (ya da .npz) + `--bpm` ya da `--taps` + `--meter` (+ `--mode`, `--shift`) → `.musicxml` |
+| `eval/eval_taps.py` | Tap modu gerçek dokunuşla ölçüm (dokunulan aralıkta; yarı otomatik + simüle karşılaştırması) |
 | `eval/eval_rhythm.py` | Ritim: kuantalayıcı tavanı, vuruş takibi, ölçü başı, kuantalama zinciri (Katman 5); `--qnet` ile 1q, `--beatnet` ile 1b satırları |
 
 Eski katmanların betikleri (Katman 2–3.8 eğitimleri, tamamlanmış tanılamalar, SynthTab hattı, reddedilen

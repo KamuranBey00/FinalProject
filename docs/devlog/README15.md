@@ -336,4 +336,5 @@ modu (kullanıcı vuruşa dokunur) ileride, Adım 2 yetmezse iyileştirme yedeğ
 - [x] Adım 2 — ölçülü TAB çıktısı (MusicXML) → [README16](README16.md): **KAPANDI** (ölçü içi konum 0.611)
 - **Katman 5 çekirdeği tamamlandı (11 Ekim):** ritim (1q + yarı otomatik 1b) + MusicXML çıktısı. Açık: AlphaTab web
   görüntüleyici (render; teknik sembolleri Katman 4'e bağlı)
-- [ ] (yedek) tap modu — kullanıcı vuruşa dokunur; Adım 2 yetmezse
+- [x] Adım 3 — ölçü kaydırma + tap modu → [README17](README17.md): tap modu simülasyonda 1b eşiklerini geçiyor
+  (gaps_test vuruş F 0.976, ölçü başı 0.889, uçtan uca IOI 0.877) ← **gerçek dokunuşla doğrulama bekleniyor**

@@ -5,7 +5,8 @@ Katman 5 Adım 2 — Uçtan uca transkripsiyon: CQT -> notalar (deep2) -> tel/pe
 Tel/perde iki mod (karıştırılmaz, README14): "ses" = duyulan konum (deep2 tel olasılıkları + öğrenilen geçiş modeli,
 kafes Viterbi), "edisyon" = klasik edisyon önerisi (EditionNet: konum + sol el parmağı).
 Ritim yarı otomatik (README15 Adım 1b): kullanıcı BPM (vuruş birimine göre) + ölçü imi verir; DBN o ölçüde, BPM ± USER_TOL
-aralığında rubato'yu sesten (BeatNet) izler; ayarlar gaps_val'de seçildi (README15 B3).
+aralığında rubato'yu sesten (BeatNet) izler; ayarlar gaps_val'de seçildi (README15 B3). Tap modu (README17): kullanıcının
+vuruş dokunuşları -> vuruşlar (gtab/decoding/taps.py). analyze (ses, bir kez) + rhythm (vuruş kaynağına göre) = transcribe.
 """
 
 import numpy as np
@@ -16,6 +17,7 @@ from gtab.core.instrument import STANDARD_6
 from gtab.data.torch_dataset import _normalize
 from gtab.decoding.beat_dbn import dbn_decode
 from gtab.decoding.edition import order_notes
+from gtab.decoding.taps import meter_phase, taps_to_beats
 from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice
 from gtab.decoding.viterbi import energy_rise, segment
 from gtab.evaluation.pitch_eval import load_selection
@@ -45,12 +47,8 @@ def load_models(device, ckpt="tabcrnn_deep2.pt", cal="checkpoints/tabcrnn_deep2.
                 tm=tm, device=device)
 
 
-def transcribe(cqt, m, bpm, sig, mode="ses", tol=USER_TOL, trans=USER_TRANS):
-    """
-    cqt (T, n_bins) dB, m = load_models(...), bpm = vuruş/dk (vuruş birimi: x/4 çeyrek, x/2 ikilik, bileşik x/8 noktalı
-    çeyrek), sig = (pay, payda). -> dict(notes (N, 3) sn, string, fret, finger (N,) (-1 = yok), beats, downbeats (sn),
-    q (N,) vuruş konumu, measures, first_beat, sig, beat_q).
-    """
+def analyze(cqt, m, mode="ses"):
+    """Ses aşaması (bir kez): -> dict(notes (N, 3) sn, string, fret, finger (N,) (-1 = yok), act (T, 3) vuruş aktivasyonu)."""
     dev = m["device"]
     _, thr, ot, rules = m["sel"]
     x = _normalize(cqt)
@@ -70,12 +68,37 @@ def transcribe(cqt, m, bpm, sig, mode="ses", tol=USER_TOL, trans=USER_TRANS):
         string[o], fret[o], finger[o] = s, f, np.where(s >= 0, g, -1)
     elif N:
         raise ValueError(mode)
-    M, beat_q = meter_of_signature(sig)
     act = activations(m["beatnet"], encode_features(m["model"], x, dev), dev)
-    beats, downs, _ = dbn_decode(act, meters=(M,), min_bpm=bpm / (1 + tol), max_bpm=bpm * (1 + tol),
-                                 trans_lambda=trans, obs_lambda=m["dbn"].get("obs_lambda", 16))
-    q = rhythm_predict(m["qnet"], notes, beats, dev, m["lam"])
-    d0 = int(np.searchsorted(beats, downs[0])) if len(downs) else 0
-    measures, first = build_measures(q, d0, M, beat_q)
-    return dict(notes=notes, string=string, fret=fret, finger=finger, beats=beats, downbeats=downs, q=q,
-                measures=measures, first_beat=first, sig=sig, beat_q=beat_q, downbeat_index=d0)
+    return dict(notes=notes, string=string, fret=fret, finger=finger, act=act)
+
+
+def rhythm(an, m, sig, bpm=None, taps=None, tol=USER_TOL, trans=USER_TRANS, shift=0):
+    """
+    Ritim aşaması: vuruşlar -> 1q konumları -> ölçüler. Vuruş kaynağı: taps (sn; tap modu, ölçü başı = ilk dokunuş,
+    README17) ya da bpm (yarı otomatik: DBN verilen ölçüde, BPM ± tol). shift: ölçü çizgilerini k vuruş ileri kaydır.
+    -> dict(beats, downbeats (sn), q (N,) vuruş konumu, measures, first_beat, sig, beat_q, downbeat_index).
+    """
+    M, beat_q = meter_of_signature(sig)
+    if taps is not None:
+        taps = np.asarray(taps, float)
+        if len(an["notes"]):                                       # müzikten önceki dokunuşlar (sayım, deneme) atılır
+            taps = taps[taps >= an["notes"][:, 0].min() - 0.15]
+        beats, downs = meter_phase(taps_to_beats(taps, an["act"]), an["act"], M)
+        d0 = int(np.searchsorted(beats, downs[0])) if len(downs) else 0
+    else:
+        beats, downs, _ = dbn_decode(an["act"], meters=(M,), min_bpm=bpm / (1 + tol), max_bpm=bpm * (1 + tol),
+                                     trans_lambda=trans, obs_lambda=m["dbn"].get("obs_lambda", 16))
+        d0 = int(np.searchsorted(beats, downs[0])) if len(downs) else 0
+    q = rhythm_predict(m["qnet"], an["notes"], beats, m["device"], m["lam"])
+    measures, first = build_measures(q, d0 + shift, M, beat_q)
+    return dict(beats=beats, downbeats=downs, q=q, measures=measures, first_beat=first, sig=sig, beat_q=beat_q,
+                downbeat_index=d0 + shift)
+
+
+def transcribe(cqt, m, bpm, sig, mode="ses", tol=USER_TOL, trans=USER_TRANS, shift=0, taps=None):
+    """
+    cqt (T, n_bins) dB, m = load_models(...), bpm = vuruş/dk (vuruş birimi: x/4 çeyrek, x/2 ikilik, bileşik x/8 noktalı
+    çeyrek; taps verilirse kullanılmaz), sig = (pay, payda) -> analyze + rhythm sözlükleri birleşik.
+    """
+    an = analyze(cqt, m, mode)
+    return dict(an, **rhythm(an, m, sig, bpm, taps, tol, trans, shift))

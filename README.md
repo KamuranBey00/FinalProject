@@ -104,7 +104,7 @@ gtab/                       çekirdek kütüphane (yalnızca import edilir)
                             rhythm_net (bağlamlı kuantalayıcı), beat_net (öğrenilen vuruş + ölçü başı)
   decoding/                 decode (ASCII tab), viterbi (nota bulma), transitions, edition (nota dizisi yardımcıları),
                             rhythm (vuruş takibi, ölçü başı, kuantalama),
-                            beat_dbn (bar-pointer DBN)
+                            beat_dbn (bar-pointer DBN), taps (tap modu: dokunuş -> vuruş + ölçü fazı)
   evaluation/               metrics, pitch_eval (kalibrasyon + nota/kare F1), rhythm_metrics
   render/                   score (ölçüler + nota değerleri), musicxml (nota + TAB portresi)
   pipeline.py               uçtan uca: ses -> notalar -> tel/perde -> vuruşlar (yarı otomatik) -> ölçülü TAB
@@ -177,7 +177,9 @@ python -m scripts.eval.eval_rhythm --qnet rhythm_q.pt --beatnet beat_net.pt --us
 
 # Ölçülü TAB (Katman 5 Adım 2; README16)
 python -m scripts.eval.eval_score
-python -m scripts.app.transcribe kayit.wav --bpm 80 --meter 3/4 [--mode edisyon]
+python -m scripts.app.transcribe kayit.wav --bpm 80 --meter 3/4 [--mode edisyon] [--shift 1]
+python -m scripts.app.transcribe kayit.wav --taps dokunuslar.txt --meter 3/4    # tap modu (README17)
+python -m scripts.eval.eval_taps --dir data/taps      # gerçek dokunuş ölçümü (scripts/app/tap_recorder.html ile kaydet)
 
 # Eski katmanların komutları (Katman 2–3.8): archive/README.md
 ```
@@ -222,6 +224,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README14.md](docs/devlog/README14.md) — Katman 3.13 (GAPS partisyonundan tel etiketi + parmak numarası; README9 3.8e)
 - [docs/devlog/README15.md](docs/devlog/README15.md) — Katman 5 (ritim ve kuantalama: vuruş, ölçü başı, nota değerleri)
 - [docs/devlog/README16.md](docs/devlog/README16.md) — Katman 5 Adım 2 (ölçülü TAB çıktısı: MusicXML, uçtan uca komut)
+- [docs/devlog/README17.md](docs/devlog/README17.md) — Katman 5 Adım 3 (ölçü kaydırma + tap modu: kullanıcı dokunuşlarıyla ritim)
 
 ## Yol haritası
 

@@ -94,7 +94,17 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   (uçtan uca), `scripts/app/transcribe.py` (ses + `--bpm` + `--meter` → .musicxml; yeni `scripts/app/`),
   `scripts/eval/eval_score.py`. Gidiş-dönüş 202 partisyon / 159 796 nota **birebir 1.0000**, doluluk %100 (scordatura →
   akort parametre). **Ölçüldü → Adım 2 KAPANDI:** dosyalar %100 geçerli, IOI/ölçü başı eval_rhythm ile birebir,
-  ölçü içi konum (tek imli) gaps_test 0.611 = yeni ritim tabanı. Sırada (kullanıcı kararı): AlphaTab web TAB görüntüleyici.
+  ölçü içi konum (tek imli) gaps_test 0.611 = yeni ritim tabanı.
+  **Adım 3 (13 Ekim, `docs/devlog/README17.md`; kullanıcı isteği):** git push (3.13 temizlik `37cbf39`, yeni dal `katman-5-ritim`
+  `3f1f47d`). Ölçü kaydırma ölçüldü: tavanı +0.005 (hatalar yerel faz kayması) → yalnız `--shift`. **Tap modu**
+  (`gtab/decoding/taps.py`: gecikme hizalama, aktivasyon kanıtlı boşluk doldurma, ölçü fazı Viterbi'si +1/+2/+0;
+  `pipeline.analyze` + `rhythm`; `transcribe --taps`): simülasyonda gaps_test "iyi" (20 ms, +50 ms, %5 kaçan, %2 fazla)
+  vuruş F 0.976, ölçü başı 0.889, IOI 0.877, ölçü içi konum 0.864 → 1b eşikleri sağlandı. Yapıştırma zararlı (çıkarıldı);
+  körlemesine boşluk doldurma fermatada vuruş ekliyor (kullanma). Gerçek dokunuş araçları: `scripts/app/tap_recorder.html`
+  (tarayıcı), `eval_taps --dir data/taps`; gecikme araması uyarlamalı (≤ 300 ms, ≤ 0.4 × dokunuş aralığı; Bluetooth).
+  **Gerçek dokunuş (13 Ekim, kullanıcı müzisyen değil, 4 kayıt):** tap modu vuruş F 0.196 / IOI 0.488 (dokunuşlar vuruşa
+  kilitli değil, yalnız kaba tempo) → tap modu ileri seçenek; **"tap tempo"** (dokunuşlardan BPM → yarı otomatik) IOI 0.702 ≈
+  BPM bilinen 0.741 → ürün varsayılanı: ölçü imi + BPM / tap tempo. Adım 3 KAPANDI; sırada kullanıcı kararı (Katman 4 / AlphaTab).
 - **Temizlik (10 Ekim):** eski / reddedilen kod `archive/` (bkz. `archive/README.md`), eski checkpoint'ler
   `checkpoints/archive/`. Aktif: data betikleri, `train_onset`, `train_edition_seq`, `eval_pitch`, `diagnose_pitch`,
   `eval_hmm`, `eval_edition`; checkpoint `tabcrnn_deep2.pt` (+cal), `edition_seq.pt`, `transitions.npz`.

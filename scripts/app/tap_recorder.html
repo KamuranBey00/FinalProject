@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vuruş Kaydedici</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --accent: #2f6fb3; --hit: #e8f0fa; --border: #d8d8d2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --fg: #ececea; --muted: #9a9a94; --accent: #6ea8e6; --hit: #22303f; --border: #3a3a37; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  p, li { color: var(--muted); }
+  audio { width: 100%; margin: 12px 0; }
+  #pad { border: 1px solid var(--border); border-radius: 10px; padding: 28px 16px; text-align: center;
+         user-select: none; font-size: 1.1rem; transition: background .08s; }
+  #pad.on { background: var(--hit); }
+  #beat { font-size: 3.2rem; font-weight: 700; color: var(--accent); }
+  #count { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+           background: transparent; color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vuruş kaydedici (tap modu)</h1>
+  <p>Katman 5 Adım 3. Ses dosyasını seç, çal ve <b>müzik başlayınca ilk ölçünün ilk vuruşundan itibaren HER VURUŞTA BOŞLUK</b>
+     tuşuna bas (ya da kutuya dokun). Vuruş = ölçüdeki her sayım: 3/4'te "1-2-3-1-2-3", 4/4'te "1-2-3-4"; kendi sabit
+     nabzını değil müziğin sayımını takip et. Önce 10–15 sn dinleyip içinden say, sonra baştan başlat. Kablolu kulaklık /
+     hoparlör kullan (Bluetooth gecikmesi büyük). Bitince "İndir" → <code>&lt;kayıt&gt;.txt</code> (saniyeler).</p>
+  <input type="file" id="file" accept="audio/*">
+  <label>ölçüdeki vuruş sayısı <input type="number" id="meter" value="3" min="1" max="12" style="width:4em"></label>
+  <audio id="audio" controls></audio>
+  <div id="pad"><div id="beat">–</div><div id="count">0</div><div id="info">dokunuş — çalarken BOŞLUK</div></div>
+  <div class="row">
+    <button class="primary" id="dl">İndir (.txt)</button>
+    <button id="undo">Son dokunuşu sil</button>
+    <button id="reset">Sıfırla (baştan)</button>
+  </div>
+  <ul>
+    <li>Kaçırdığın ya da fazla bastığın birkaç vuruş sorun değil; sistem düzeltir.</li>
+    <li>Sabit tempoda değil, müziği takip ederek bas (rubato'da yavaşlayıp hızlan).</li>
+    <li>Parçanın tamamı gerekmez; en az 60 sn yeterli.</li>
+  </ul>
+</main>
+<script>
+  const audio = document.getElementById("audio"), pad = document.getElementById("pad");
+  const count = document.getElementById("count"), info = document.getElementById("info");
+  let taps = [], name = "dokunuslar";
+  document.getElementById("file").onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    name = f.name.replace(/\.[^.]+$/, ""); audio.src = URL.createObjectURL(f); reset();
+  };
+  function render() {
+    const M = Math.max(1, +document.getElementById("meter").value || 1);
+    document.getElementById("beat").textContent = taps.length ? `${(taps.length - 1) % M + 1} / ${M}` : "–";
+    count.textContent = taps.length + " dokunuş";
+    const n = taps.length;
+    info.textContent = n >= 2 ? `son aralık ${(taps[n - 1] - taps[n - 2]).toFixed(2)} sn ≈ ${(60 / (taps[n - 1] - taps[n - 2])).toFixed(0)} BPM`
+                              : "dokunuş — çalarken BOŞLUK";
+  }
+  function tap() {
+    if (audio.paused || !audio.src) return;
+    taps.push(audio.currentTime); render();
+    pad.classList.add("on"); setTimeout(() => pad.classList.remove("on"), 80);
+  }
+  function reset() { taps = []; audio.currentTime = 0; render(); }
+  document.addEventListener("keydown", e => {               // yakalama aşaması: oynatıcı boşlukla duraklamasın
+    if (e.code === "Space") { e.preventDefault(); e.stopPropagation(); if (!e.repeat) tap(); }
+  }, true);
+  audio.addEventListener("play", () => audio.blur());
+  pad.addEventListener("pointerdown", tap);
+  document.getElementById("undo").onclick = () => { taps.pop(); render(); };
+  document.getElementById("reset").onclick = reset;
+  document.getElementById("dl").onclick = () => {
+    const blob = new Blob([taps.map(t => t.toFixed(4)).join("\n") + "\n"], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name + ".txt"; a.click();
+  };
+</script>
+</body>
+</html>
