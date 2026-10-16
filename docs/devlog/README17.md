@@ -135,3 +135,68 @@ Bu karar için 4 kayıt yeterli; ek dokunuş dosyası gerekmiyor.
 - [x] Gerçek dokunuş araçları: `tap_recorder.html`, `eval_taps`, uyarlamalı gecikme araması
 - [x] Gerçek dokunuşla doğrulama: müzisyen olmayan kullanıcıda tap modu başarısız (IOI 0.488), tap tempo → yarı otomatik 0.702
   → tap modu ileri seçenek, ürün varsayılanı ölçü + BPM / tap tempo. **Katman 5 Adım 3 KAPANDI.**
+
+---
+
+## Ek A — Armağan dalı birleşimi (`origin/Armagan-katman-4`, 15–16 Ekim)
+
+Armağan'ın dalı 3.13'ten (`72295e6`) ayrılmıştı: Katman 4 Faz 0–2A (ölçüm protokolü, teknik etiket envanteri, sürekli F0
+altyapısı), parmaklandırma P1–P3 (inceleme, test altyapısı, çalınabilirlik metrikleri) ve bir bakım turu. Önce bizim Adım 3
+işimiz yeni dala pushlandı (`katman-5.1-tap-modu` @ `c16dbc6`), sonra yalnız değişen / eklenen dosyalar alındı. Armağan'ın
+devlogları bizim numaralarla çakıştığı için alınmadı; özü bu bölümde.
+
+### Eski hatalar ve çözümleri (Armağan)
+| Sorun (önce) | Çözüm (şimdi) |
+|---|---|
+| Ürün tel seçimi test edilmemiş ayarla: `w_transition` 1.0 (tab F1 0.751); bütün ölçümler 0 ile (0.777) | ASCII aracı varsayılanı 0; **`gtab/pipeline.py` ses modu da 0** (birleşimde düzeltildi) |
+| Tekrar işaretleri sesteki ölçü sayısını tutturmayan 75 GAPS kaydı atılıyordu (icracı yazmayan tekrar çalmış) | `gaps_score`: ölçü sırası çalınan içerikten (Dice benzerliği + Viterbi); `align(recover=False)` eskisiyle birebir; `build_gaps_tab --recover-repeats` → `data/cache/gaps_tab_rec` (165 → **236** kayıt, eski etiketlerle %99.9 uyum) |
+| Eğitim, `--ckpt` unutulunca kullanılan modelin (`edition_seq.pt` dahil) üstüne yazıyordu | `utils.guard_new_checkpoint`; `train_onset` / `train_edition_seq` `--overwrite` olmadan durur; `--seed` |
+| ASCII TAB: `712` yapışık perdeler, aynı kutuya düşen nota siliniyordu (995 notadan 959) | kutu = en uzun perde + 1, çakışan nota sonraki kutuya; 995/995 |
+| Ana tab F1 ölçümü 15 bayrakla | `eval_hmm --load-cal checkpoints/tabcrnn_deep2.cal.json` |
+| `test_edition` mir_eval yoksa çöküyordu | `HAVE_MIR_EVAL` kapısı |
+| "±0.01 tohum gürültüsü" hiç ölçülmemişti | ölçüldü: tab F1 0.009, A teli 0.021 |
+| Çalınabilirlik hiç ölçülmüyordu (sunum slayt 12) | `gtab/decoding/playability.py` + `eval_playability` (zamanda örtüşen çiftlerde parmak çakışması, açıklık, ters sıra, barre, pozisyon kayması; model / naif / editör) |
+| Gerçek tel etiketi yok (hex) | `gtab/data/hex.py`, `build_hex` (GuitarSet hex → tel başına spektrum; `train_onset --hex-weight`): tel kararını değiştirmedi |
+
+Yeni test / koruma altyapısı: `tests/` (**204 test**, `python -m unittest discover -s tests -t .`), `check_protocol` (veri
+envanteri + split kapıları, 17 kontrol), `check_inference_regression` (deep2 çıkarım parmak izi, `docs/baselines/`).
+Katman 4 hazırlığı (eğitim yok): `gtab/evaluation/{protocol,technique_eval,selection,baselines,fingerprint}.py`,
+`gtab/data/contour.py` + `build_contour` (F0 konturu), `inventory_technique`, `probe_gaps_f0`. Faz 1 bulgusu: **GuitarSet ve
+GAPS'te sol el tekniği etiketi yok** → kapsam A: vibrato + hammer-on + pull-off (kuraldan sözde etiket), B: slide ek etiket
+ister, C: bend ve armonik kapsam dışı. P3 (çalınabilirlik, gaps_val kesişim 2 963 akor): kesin parmak çakışması model %8.5,
+naif %13.4, editör %0; ≥ 4 yarım ses açıklık model %3.6, naif %27.4.
+
+Aday parmak modeli `checkpoints/edition_seq_rec.pt` (kurtarılmış 182 kayıtla): gaps_val tel / parmak 0.784 / 0.700 (ürün
+`edition_seq.pt` 0.766 / 0.675). **Ürüne alınacak (kullanıcı kararı), ama hemen değil**; önce ikinci tohum + çalınabilirlik.
+
+### Birleşim (bizim tarafımız)
+- İki dalda da değişen 3 dosya üç yönlü birleşti: `eval_hmm`, `train_onset` temiz (bizim `--init tabcrnn_deep2.pt` korundu);
+  `gaps_score.align` dönüşü iki tarafın alanlarını birlikte veriyor (Katman 5: `order`, `lens`, `score_x`; Armağan:
+  `order_source`, `bar_quality`). Eski sürümle 25 GAPS kaydında tüm alanlar **birebir** → ritim etiketleri etkilenmedi.
+- `tests/test_edition.py`: arşivlenen 2a log-lineer sınıfları `archive.gtab.decoding.edition_loglinear`'dan.
+- ASCII TAB aracı `scripts/transcribe.py` → **`scripts/app/transcribe_ascii.py`** (yapı: `scripts/<data|train|eval|app>`).
+  Katman 5 ritmi eklendi: `--meter` + `--taps` (tap modu) / `--bpm` (yarı otomatik) → TAB'a ölçü çizgileri (`|`);
+  `render_ascii_tab(bars=None)` varsayılanı eskisiyle birebir. Dokunuş dosyası okuma ortak: `gtab.decoding.taps.load_taps`.
+- Alınmayanlar: Armağan devlogları, `docs/audit/`, `.vscode`, `.patch`.
+
+## Ek B — Yapı düzenlemeleri (16 Ekim; Katman 6 öncesi)
+
+- **Model yığını + bağımlılık denetimi (genel sistem):** `gtab/models/stack.py` + `checkpoints/active.json` (yoksa
+  varsayılan). Ürün ve ölçüm varsayılanları (`pipeline.load_models`, `load_model`, `transcribe_ascii`, `eval_rhythm`,
+  `eval_edition`, `diagnose_pitch`, `build_beat_feats`, `train_beat`, `check_inference_regression`) tek yerden okur.
+  Taban ses modeline bağlı olanlar: kalibrasyon (`<taban>.cal.json`), BeatNet (checkpoint `feats` alanı), BeatNet önbelleği,
+  regresyon parmak izi. `python -m scripts.eval.check_stack` denetler ve eskiyen her parça için yeniden üretme komutunu
+  yazar; yeni taban: `--set acoustic=<yeni>.pt cal=<yeni>.cal.json`. `load_models` uyumsuz kalibrasyon / BeatNet ile
+  çalışmayı reddeder (sessiz bozulma yok). Sembolik modeller (rhythm_q, edition, transitions) ses modelinden bağımsız.
+- `eval_pitch --splits` varsayılanı `gaps_val val val_comp` (önce `gaps_test` açıyordu); gaps_test yalnız raporda açıkça.
+- `requirements.txt`: Python 3.10 (.venv 3.10.11; Armağan notu 3.11 diyordu).
+- Doğrulama: 204 test OK, `check_protocol` 17/17, regresyon yok, `check_stack` tutarlı.
+
+### Açık notlar (kapanmadı, unutulmasın)
+- **A teli:** solo A teli tel doğruluğu `tabcrnn_gaps.pt` (README10) 0.600 → **deep2 0.641** (oracle notalar, GuitarSet;
+  Armağan ölçümü). Kök neden çalış alışkanlığı (eğitim icracıları bu sesleri %60 D telinde çalıyor). Ağırlık / hex denemeleri
+  etkisiz. **İleride dönülecek; güncel değer 0.641 üzerinden.**
+- **Tremolo (<100 ms tekrarlar):** Katman 4'te, teknik veri setleri ve teknikler hazır olunca.
+- **`edition_seq_rec.pt`:** ürüne alınacak, acelesi yok.
+- **Katman 6'da çıkacak sorunlar Katman 6'da çözülecek** (ör. taban değişirse BeatNet yeniden eğitimi; `check_stack`
+  bunu gösterir).

@@ -116,7 +116,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="crnn", choices=["cnn", "crnn"])
     ap.add_argument("--ckpt", default=None)
-    ap.add_argument("--splits", nargs="+", default=["gaps_test", "val", "val_comp"])
+    ap.add_argument("--splits", nargs="+", default=["gaps_val", "val", "val_comp"],
+                    help="varsayilan secim splitleri; gaps_test yalniz raporlama icin acikca yazilir")
     ap.add_argument("--select-split", default="auto",
                     help="auto = her test setinin esigi kendi alaninin dogrulamasinda (GuitarSet->val, "
                          "GAPS->gaps_val); 'val' = eski davranis. Test split'i OLMAMALI.")

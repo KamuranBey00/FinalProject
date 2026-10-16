@@ -35,6 +35,7 @@ from gtab.decoding.viterbi import energy_rise, segment
 from gtab.evaluation.pitch_eval import load_selection
 from gtab.models.edition_net import EditionNet, predict as seq_predict
 from gtab.models.inference import load_model, predict_heads
+from gtab.models.stack import active
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import get_device
 
@@ -238,7 +239,7 @@ def main(ckpt, seq, load_cal):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--seq", default="edition_seq.pt")
-    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
-    ap.add_argument("--load-cal", default="checkpoints/tabcrnn_deep2.cal.json")
+    ap.add_argument("--ckpt", default=active()["acoustic"])
+    ap.add_argument("--load-cal", default=ckpt_path(active()["cal"]))
     a = ap.parse_args()
     main(a.ckpt, a.seq, a.load_cal)

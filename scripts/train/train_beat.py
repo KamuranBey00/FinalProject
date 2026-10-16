@@ -26,6 +26,7 @@ from gtab.data.gaps import gaps_files
 from gtab.decoding.beat_dbn import dbn_decode, peak_beats
 from gtab.evaluation.rhythm_metrics import beat_scores, in_span, onset_f
 from gtab.models.beat_net import N_IN, BeatNet, activations, frame_targets
+from gtab.models.stack import active
 from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import get_device, set_seed
 
@@ -152,7 +153,7 @@ def main(ckpt, out, epochs, lr, bs, seed, limit, stretch):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt", help="temsil önbelleğinin ses modeli")
+    ap.add_argument("--ckpt", default=active()["acoustic"], help="temsil önbelleğinin ses modeli")
     ap.add_argument("--out", default="beat_net.pt")
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--lr", type=float, default=1e-3)

@@ -19,13 +19,14 @@ import torch
 from gtab.core.instrument import STANDARD_6
 from gtab.data.torch_dataset import _window
 from gtab.models.nets import TabCNN, TabCRNN, TabCRNNOnset
+from gtab.models.stack import active
 from gtab.paths import CKPT_DIR, ckpt_path
 
-DEFAULT_CKPT = {"cnn": os.path.join(CKPT_DIR, "archive", "tabcnn.pt"), "crnn": "tabcrnn_deep2.pt"}   # güncel taban
+DEFAULT_CKPT = {"cnn": os.path.join(CKPT_DIR, "archive", "tabcnn.pt"), "crnn": active()["acoustic"]}   # güncel taban (stack)
 
 
 def load_model(kind, device, ckpt=None, instrument=STANDARD_6):
-    """ckpt=None -> crnn: checkpoints/tabcrnn_deep2.pt (güncel taban) | cnn: checkpoints/archive/tabcnn.pt."""
+    """ckpt=None -> crnn: aktif yığının taban modeli (checkpoints/active.json; tabcrnn_deep2.pt) | cnn: checkpoints/archive/tabcnn.pt."""
     path = ckpt_path(ckpt or DEFAULT_CKPT[kind])
     ck = torch.load(path, map_location=device)
     if kind == "crnn":

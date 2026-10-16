@@ -1,4 +1,4 @@
-# Python 3.10. Sürümler çalışan ortama sabitlendi (9 Ekim 2026).
+# Python 3.10 (.venv 3.10.11; testler bu sürümde geçiyor). Sürümler çalışan ortama sabitlendi (9 Ekim 2026).
 # torch: CUDA 12.1 derlemesi (GPU). Düz "torch==2.3.1" Windows'ta PyPI'dan CPU derlemesini çeker.
 # numpy<2 ZORUNLU: torch 2.3.1 NumPy 1.x ile derlendi (numpy 2.x -> "Numpy is not available").
 --extra-index-url https://download.pytorch.org/whl/cu121

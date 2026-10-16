@@ -48,7 +48,8 @@ from gtab.models.beat_net import activations, encode_features, load_beat_net
 from gtab.models.inference import load_model, predict_heads
 from gtab.models.rhythm_net import load_rhythm_net
 from gtab.models.rhythm_net import predict as predict_q
-from gtab.paths import CACHE_DIR
+from gtab.models.stack import active
+from gtab.paths import CACHE_DIR, ckpt_path
 from gtab.utils import get_device
 
 INSTR = STANDARD_6
@@ -381,8 +382,8 @@ def main(ckpt, load_cal, limit, qnet_ckpt, beat_ckpt, user_tempo):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
-    ap.add_argument("--load-cal", default="checkpoints/tabcrnn_deep2.cal.json")
+    ap.add_argument("--ckpt", default=active()["acoustic"])
+    ap.add_argument("--load-cal", default=ckpt_path(active()["cal"]))
     ap.add_argument("--limit", type=int, default=None, help="split basina en cok kayit (duman testi)")
     ap.add_argument("--qnet", default=None, help="Adim 1q kuantalayici (orn. rhythm_q.pt)")
     ap.add_argument("--beatnet", default=None, help="Adim 1b vurus agi (orn. beat_net.pt)")

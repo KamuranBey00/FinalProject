@@ -101,22 +101,31 @@ gtab/                       çekirdek kütüphane (yalnızca import edilir)
   data/                     features (CQT), labels, tab_labels, torch_dataset,
                             guitarset / gaps / gaps_score (veri seti okuyucuları)
   models/                   nets (TabCRNNOnset + eski ağlar), losses, inference, edition_net (edisyon önerisi),
-                            rhythm_net (bağlamlı kuantalayıcı), beat_net (öğrenilen vuruş + ölçü başı)
+                            rhythm_net (bağlamlı kuantalayıcı), beat_net (öğrenilen vuruş + ölçü başı),
+                            stack (aktif model yığını + bağımlılık denetimi; checkpoints/active.json)
   decoding/                 decode (ASCII tab), viterbi (nota bulma), transitions, edition (nota dizisi yardımcıları),
                             rhythm (vuruş takibi, ölçü başı, kuantalama),
-                            beat_dbn (bar-pointer DBN), taps (tap modu: dokunuş -> vuruş + ölçü fazı)
-  evaluation/               metrics, pitch_eval (kalibrasyon + nota/kare F1), rhythm_metrics
+                            beat_dbn (bar-pointer DBN), taps (tap modu: dokunuş -> vuruş + ölçü fazı),
+                            playability (çalınabilirlik metrikleri)
+  evaluation/               metrics, pitch_eval (kalibrasyon + nota/kare F1), rhythm_metrics,
+                            protocol / selection / technique_eval / baselines / fingerprint (Katman 4 hazırlığı, testler)
   render/                   score (ölçüler + nota değerleri), musicxml (nota + TAB portresi)
   pipeline.py               uçtan uca: ses -> notalar -> tel/perde -> vuruşlar (yarı otomatik) -> ölçülü TAB
 scripts/                    AKTİF çalıştırılan dosyalar (python -m scripts.<klasör>.<ad>)
   data/                     get_guitarset, build_guitarset, build_tab_labels, build_comp,
-                            get_gaps, build_gaps, build_gaps_tab, build_rhythm, build_beat_feats
+                            get_gaps, build_gaps, build_gaps_tab (--recover-repeats), build_rhythm, build_beat_feats,
+                            build_hex, build_contour
   train/                    train_onset (ses modeli; güncel taban deep2), train_edition_seq (edisyon önerisi),
                             train_rhythm_q (bağlamlı kuantalayıcı), train_beat (vuruş ağı)
   eval/                     eval_pitch (nota/kare F1), diagnose_pitch, eval_hmm (GS tab F1), eval_edition,
-                            eval_rhythm (ritim: vuruş, ölçü başı, kuantalama), eval_score (MusicXML çıktısı)
-  app/                      transcribe (ses + BPM + ölçü -> .musicxml)
-checkpoints/                AKTİF: tabcrnn_deep2.pt (+ .cal.json), transitions.npz, edition_seq.pt, rhythm_q.pt, beat_net.pt
+                            eval_rhythm (ritim: vuruş, ölçü başı, kuantalama), eval_score (MusicXML çıktısı),
+                            eval_taps, eval_playability, check_stack (model yığını), check_protocol,
+                            check_inference_regression, inventory_technique, probe_gaps_f0
+  app/                      transcribe (ses + BPM / dokunuş + ölçü -> .musicxml), transcribe_ascii (ASCII TAB),
+                            tap_recorder.html
+tests/                      otomatik testler (python -m unittest discover -s tests -t .)
+checkpoints/                AKTİF (active.json): tabcrnn_deep2.pt (+ .cal.json), transitions.npz, edition_seq.pt, rhythm_q.pt,
+                            beat_net.pt; aday edition_seq_rec.pt
   archive/                  eski / reddedilen modeller (Katman 2 – 3.13)
 archive/                    eski ve reddedilen kod (Katman 2–3.8 eğitimleri, tamamlanmış tanılamalar,
                             SynthTab hattı, log-lineer edisyon) -- bkz. archive/README.md
@@ -224,7 +233,9 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README14.md](docs/devlog/README14.md) — Katman 3.13 (GAPS partisyonundan tel etiketi + parmak numarası; README9 3.8e)
 - [docs/devlog/README15.md](docs/devlog/README15.md) — Katman 5 (ritim ve kuantalama: vuruş, ölçü başı, nota değerleri)
 - [docs/devlog/README16.md](docs/devlog/README16.md) — Katman 5 Adım 2 (ölçülü TAB çıktısı: MusicXML, uçtan uca komut)
-- [docs/devlog/README17.md](docs/devlog/README17.md) — Katman 5 Adım 3 (ölçü kaydırma + tap modu: kullanıcı dokunuşlarıyla ritim)
+- [docs/devlog/README17.md](docs/devlog/README17.md) — Katman 5 Adım 3 (ölçü kaydırma + tap modu: kullanıcı dokunuşlarıyla ritim);
+  Ek A Armağan dalı birleşimi (eski hata düzeltmeleri, testler, Katman 4 hazırlığı); Ek B model yığını + bağımlılık denetimi
+- [docs/devlog/README18.md](docs/devlog/README18.md) — Katman 6 (gerçek dünya: kayıt koşulu, polifoni, akort, kendi kayıtlarımız; [kayıt protokolü](docs/KAYIT_PROTOKOLU.md))
 
 ## Yol haritası
 
@@ -238,27 +249,32 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
       (sunum Phase 3–4; bkz. [docs/devlog/README9.md](docs/devlog/README9.md))
 - [x] Katman 3.9 — Tel/perde sesini öğrenmek: onset + harmonik istifleme
       (bkz. [docs/devlog/README10.md](docs/devlog/README10.md))
-- [ ] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
+- [x] Katman 3.10 — Polifonide perde: hayalet notalar ve kaçan perdeler
       (bkz. [docs/devlog/README11.md](docs/devlog/README11.md)) — fingerstyle (GAPS) ölçütü sağlandı,
-      tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik, kapanış kararı bekleniyor
+      tab F1 0.760 (`tabcrnn_rep_off.pt`); akor ölçütü eksik kaldı, 3.11–3.12 ile devam edildi (kapandı)
 - [x] Katman 3.11 — Hızlı tekrarlar (tremolo): yerel tepe çözümlemesi + noisy-OR + vadi eğitimi
       (bkz. [docs/devlog/README12.md](docs/devlog/README12.md)) — `tabcrnn_rep_valley.pt`, tab F1 0.769 / 0.771,
       akor tekrar kaçma <100 ms %72 → %23; GAPS <100 ms tekrarları açık kaldı
 - [x] Katman 3.12 — Akustik katman: kapasite ölçümü → derin CNN (artık bloklar) + perde-onset kafası
       (bkz. [docs/devlog/README13.md](docs/devlog/README13.md)) — **`tabcrnn_deep2.pt`**: GAPS nota F1
       0.720 → **0.779**, tab F1 **0.777**, val_comp 0.807; kapasite farkı 0.004 → SynthTab (3b) gerekmedi
-- [ ] Katman 3.13 — GAPS partisyon TAB'ı → klasik gitarda tel etiketi + parmak numarası (README9 3.8e;
+- [x] Katman 3.13 — GAPS partisyon TAB'ı → klasik gitarda tel etiketi + parmak numarası (README9 3.8e;
       bkz. [docs/devlog/README14.md](docs/devlog/README14.md)) — 165 kayıt etiketlendi; TAB ile ses eğitimi
       genellenmedi; **"klasik edisyon önerisi"** (sembolik konum + sol el parmağı, iki yönlü dizi modeli):
       gaps_test tel 0.815 (naif 0.745), parmak 0.636 (taban 0.566); ses modu GuitarSet 0.878 korunuyor
 - [ ] Katman 4 — Teknikler: sürekli F0 eğrisi + onset zarfından bend, slide,
-      hammer-on/pull-off, vibrato tespiti
+      hammer-on/pull-off, vibrato tespiti — hazırlık yapıldı (Armağan Faz 0–2A, README17 Ek A: etiket yok → kapsam vibrato +
+      hammer-on + pull-off); **tremolo (<100 ms tekrarlar) burada**, teknik veri setleri hazır olunca
 - [ ] Katman 5 — Ritim + render: tempo/beat takibi, kuantalama, AlphaTab ile
       bend/slide sembollü gerçek tab görseli — **çekirdek tamamlandı** (ritim + MusicXML; AlphaTab görüntüleyici açık;
       Katman 4'ten önce, kullanıcı kararı;
       bkz. [docs/devlog/README15.md](docs/devlog/README15.md)): GAPS partisyonundan rubato'lu vuruş / ölçü başı /
       nota konumu etiketleri (166 kayıt), eğitimsiz taban ölçüldü; Adım 1q bağlamlı kuantalayıcı (`rhythm_q.pt`) kabul (gaps_test oracle IOI 0.933); Adım 1b öğrenilen
       vuruş + DBN: tam otomatik hedefin altında → yarı otomatik (kullanıcı BPM + ölçü; uçtan uca 0.695) kullanıcı kararıyla
-      bu hâliyle; Adım 2 ölçülü TAB (MusicXML) kodlandı ([README16](docs/devlog/README16.md))
-- [ ] Katman 6 — Zorlaştırma: polifoni (akorlar), distortion dayanıklılığı,
-      farklı gitar/akort desteği
+      bu hâliyle; Adım 2 ölçülü TAB (MusicXML) kodlandı ([README16](docs/devlog/README16.md)); Adım 3 tap modu (ileri
+      seçenek) + tap tempo, Armağan birleşimi, model yığını ([README17](docs/devlog/README17.md))
+- [ ] Katman 6 — Zorlaştırma: polifoni (akorlar), kayıt koşulu dayanıklılığı (distortion yerine: oda, telefon, gürültü),
+      farklı gitar/akort desteği, kendi test setimiz — **sürüyor** ([README18](docs/devlog/README18.md)): Adım 0 ölçümü
+
+**Açık notlar (kapanmadı):** A teli tel doğruluğu (solo, oracle notalar) `tabcrnn_gaps.pt` 0.600 → deep2 **0.641** — ileride
+dönülecek (README17 Ek B); tremolo Katman 4'te; `edition_seq_rec.pt` ürüne alınacak (acelesi yok).

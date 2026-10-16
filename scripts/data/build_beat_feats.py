@@ -21,6 +21,7 @@ import numpy as np
 from gtab.data.torch_dataset import _normalize
 from gtab.models.beat_net import encode_features
 from gtab.models.inference import load_model
+from gtab.models.stack import active
 from gtab.paths import CACHE_DIR
 from gtab.utils import get_device
 
@@ -52,7 +53,7 @@ def main(ckpt, limit):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
+    ap.add_argument("--ckpt", default=active()["acoustic"])
     ap.add_argument("--limit", type=int, default=None, help="bolme basina en cok kayit (duman testi)")
     a = ap.parse_args()
     main(a.ckpt, a.limit)

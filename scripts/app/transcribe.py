@@ -22,6 +22,7 @@ import os
 import numpy as np
 
 from gtab.data.features import cqt_from_file
+from gtab.decoding.taps import load_taps
 from gtab.pipeline import load_models, transcribe
 from gtab.render.musicxml import write_musicxml
 from gtab.utils import get_device
@@ -34,7 +35,7 @@ def main(src, bpm, meter, mode, out, shift, taps_file):
             cqt = d["cqt"]
     else:
         cqt = cqt_from_file(src)
-    taps = np.array(open(taps_file).read().replace(",", " ").split(), float) if taps_file else None
+    taps = load_taps(taps_file) if taps_file else None
     m = load_models(get_device())
     r = transcribe(cqt, m, bpm, sig, mode, shift=shift, taps=taps)
     bpm = bpm or 60 / np.median(np.diff(r["beats"]))                    # tap modu: metronom işareti dokunuşlardan

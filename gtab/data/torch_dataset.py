@@ -124,8 +124,11 @@ class GuitarSetSeq(Dataset):
 
     def __init__(self, cache_dir, split, chunk=200, augment=False, num_frets=24,
                  bins_per_semitone=2, onsets=False, onset_soft=None, short_frames=0, short_weight=1.0,
-                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None):
+                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None,
+                 hex_dir=None):
         """
+        README17 Ek A: hex_dir -> per-string hex spectra (data/cache/hex/<id>.npz) as an extra target; items
+        then end with (hex (L,6,B), has_hex). None = old behaviour, identical.
         Katman 3.11 Adım 4: valley_weight (hızlı tekrar vadisi "vuruş yok", hedef 0), frag_weight +
         frag_fn(path, cqt, tab, keskin_onset) -> (T,S) bool (modelin sahte bölünme yerleri); self.fast =
         parça hızlı tekrar içeriyor mu (örnekleme). Varsayılanlar = eski eğitim, birebir.
@@ -144,6 +147,8 @@ class GuitarSetSeq(Dataset):
         self.num_frets = num_frets
         self.bps = bins_per_semitone
         self.items = []
+        self.hex_dir = hex_dir
+        self.hex, self.has_hex = [], []
         splits = [split] if isinstance(split, str) else list(split)
         paths = []
         for sp in splits:
@@ -176,6 +181,12 @@ class GuitarSetSeq(Dataset):
                     fm = frag_fn(path, cqt, tab, hard)
                     ow_all = np.where(fm, np.maximum(ow_all, frag_weight), ow_all)
             T, n_bins = cqt.shape
+            hx_all = None
+            if hex_dir is not None:
+                hp = os.path.join(hex_dir, os.path.basename(path))
+                if os.path.exists(hp):
+                    with np.load(hp) as hd:
+                        hx_all = hd["spec"]
             for start in range(0, T, chunk):
                 c = cqt[start:start + chunk]; tb = tab[start:start + chunk]
                 L = len(c)
@@ -184,6 +195,11 @@ class GuitarSetSeq(Dataset):
                     pt = np.full((chunk, tab.shape[1]), self.PAD, np.int64); pt[:L] = tb
                     c, tb = pc, pt
                 self.items.append((c, tb, L))
+                if hex_dir is not None:
+                    hx = np.zeros((chunk, 6, n_bins // 2), np.float16)
+                    if hx_all is not None:
+                        hx[:L] = hx_all[start:start + chunk]
+                    self.hex.append(hx); self.has_hex.append(hx_all is not None)
                 if onsets:
                     on = np.zeros((chunk, tab.shape[1]), np.float16)
                     on[:L] = on_all[start:start + chunk]
@@ -203,10 +219,13 @@ class GuitarSetSeq(Dataset):
         if self.augment:
             c, tb = self._augment(c, tb)
         if self.with_onsets:
-            return (torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb),
-                    torch.from_numpy(self.onsets[i].astype(np.float32)),
-                    torch.from_numpy(self.weights[i].astype(np.float32)),
-                    torch.from_numpy(self.on_weights[i].astype(np.float32)), L)
+            out = (torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb),
+                   torch.from_numpy(self.onsets[i].astype(np.float32)),
+                   torch.from_numpy(self.weights[i].astype(np.float32)),
+                   torch.from_numpy(self.on_weights[i].astype(np.float32)), L)
+            if self.hex_dir is not None:
+                out += (torch.from_numpy(self.hex[i].astype(np.float32)), self.has_hex[i])
+            return out
         return torch.from_numpy(c).unsqueeze(0), torch.from_numpy(tb), L
 
     # ------------------------------------------------------------ Katman 3.7

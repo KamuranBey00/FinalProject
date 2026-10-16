@@ -27,6 +27,7 @@ from gtab.models.edition_net import predict as edition_predict
 from gtab.models.inference import load_model, predict_heads
 from gtab.models.rhythm_net import load_rhythm_net
 from gtab.models.rhythm_net import predict as rhythm_predict
+from gtab.models.stack import active, check
 from gtab.paths import ckpt_path
 from gtab.render.score import build_measures, meter_of_signature
 
@@ -34,16 +35,22 @@ INSTR = STANDARD_6
 USER_TOL, USER_TRANS = 0.35, 10.0                    # README15 B3 (gaps_val uçtan uca IOI seçimi)
 
 
-def load_models(device, ckpt="tabcrnn_deep2.pt", cal="checkpoints/tabcrnn_deep2.cal.json", qnet="rhythm_q.pt",
-                beatnet="beat_net.pt", edition="edition_seq.pt", domain="gaps_val"):
-    """Tüm ağlar + çözümleme seçimi (domain: 'gaps_val' = klasik gitar, 'val' = GuitarSet)."""
-    model, _, _ = load_model("crnn", device, ckpt)
-    q, lam = load_rhythm_net(qnet, device)
-    b, dbn = load_beat_net(beatnet, device)
+def load_models(device, domain="gaps_val", **override):
+    """
+    Tüm ağlar + çözümleme seçimi (domain: 'gaps_val' = klasik gitar, 'val' = GuitarSet). Dosyalar aktif yığından
+    (gtab/models/stack.py, checkpoints/active.json); override ile tek tek değiştirilebilir (ör. edition="x.pt").
+    """
+    s = dict(active(), **override)
+    bad = [f"{n}: {msg}" for n, st, msg, _ in check(s) if st == "uyumsuz" and n in ("cal", "beat_net")]
+    if bad:                                              # yanlış eşleşmiş ağlarla sessizce çalışma
+        raise ValueError("model yigini tutarsiz (python -m scripts.eval.check_stack): " + "; ".join(bad))
+    model, _, _ = load_model("crnn", device, s["acoustic"])
+    q, lam = load_rhythm_net(s["rhythm_q"], device)
+    b, dbn = load_beat_net(s["beat_net"], device)
     ed = EditionNet().to(device)
-    ed.load_state_dict(torch.load(ckpt_path(edition), map_location=device)["model"])
-    tm = TransitionModel.load(ckpt_path("transitions.npz"), INSTR)
-    return dict(model=model, sel=load_selection(cal)[domain], qnet=q, lam=lam, beatnet=b, dbn=dbn, edition=ed.eval(),
+    ed.load_state_dict(torch.load(ckpt_path(s["edition"]), map_location=device)["model"])
+    tm = TransitionModel.load(ckpt_path(s["transitions"]), INSTR)
+    return dict(model=model, sel=load_selection(ckpt_path(s["cal"]))[domain], qnet=q, lam=lam, beatnet=b, dbn=dbn, edition=ed.eval(),
                 tm=tm, device=device)
 
 
@@ -59,7 +66,7 @@ def analyze(cqt, m, mode="ses"):
     N = len(notes)
     string, fret, finger = np.full(N, -1), np.full(N, -1), np.full(N, -1)
     if N and mode == "ses":
-        for i, (s, f) in enumerate(decode_lattice(build_lattice(segs, probs, m["tm"]), 1.0, 1.0)):
+        for i, (s, f) in enumerate(decode_lattice(build_lattice(segs, probs, m["tm"]), 1.0, 0.0)):
             if s is not None:
                 string[i], fret[i] = s, f
     elif N and mode == "edisyon":

@@ -21,6 +21,12 @@ import numpy as np
 from gtab.config import FRAME_RATE
 
 
+def load_taps(path):
+    """tap_recorder.html çıktısı -> dokunuş zamanları (sn); satır, boşluk ya da virgülle ayrılmış."""
+    with open(path) as f:
+        return np.array(f.read().replace(",", " ").split(), float)
+
+
 def _local_ibi(t):
     """Her aralık için yerel vuruş aralığı: komşu 5 aralığın medyanı."""
     d = np.diff(t)

@@ -44,6 +44,7 @@ from gtab.decoding.viterbi import pick_peaks, pitch_matrix, pitch_onset_matrix, 
 from gtab.evaluation.pitch_eval import (DEC_GRID, calibrate, load_selection, load_split, roll_to_notes,
                                         selection_split, to_mir)
 from gtab.models.inference import load_model
+from gtab.models.stack import active
 from gtab.utils import get_device
 
 INSTR = STANDARD_6
@@ -402,7 +403,7 @@ def main(ckpt, splits, onset_thr=None, dec_search=True, criterion="note", peak_s
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="tabcrnn_deep2.pt")
+    ap.add_argument("--ckpt", default=active()["acoustic"])
     ap.add_argument("--splits", nargs="+", default=["val_comp", "gaps_val"])
     ap.add_argument("--onset-thr", type=float, default=None, help="bos = dogrulamada sec; -1 = kare-esik")
     ap.add_argument("--no-dec-search", action="store_true", help="Katman 3.9 cozumlemesi (Adim 0 olcumu)")

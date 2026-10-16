@@ -13,6 +13,7 @@ MIDI notası (bire bir). Eşleşmeyen MIDI notasının teli bilinmez (maske).
 import json
 import os
 import xml.etree.ElementTree as ET
+from typing import List, Tuple
 
 import numpy as np
 
@@ -134,11 +135,12 @@ def unroll(meas):
     return order
 
 
-def score_notes(xml_path):
+def score_notes(xml_path, order=None):
     """
     MusicXML -> (açılmış ölçü sırası, ölçü uzunlukları, TAB notaları listesi).
     TAB notası: dict(bar=açılmış indeks, tick, pitch (çalan), string (1 = ince mi), fret, finger).
     Parmak numarası nota portresinden (aynı ölçü + tick + çalan perde) TAB notasına taşınır.
+    order: verilirse tekrar işaretleri yerine bu ölçü sırası kullanılır (README17 Ek A: içerikten hizalama).
     """
     root = ET.parse(xml_path).getroot()
     parts = [parse_part(p) for p in root.findall("part")]
@@ -153,7 +155,7 @@ def score_notes(xml_path):
                 for n in m["notes"]:
                     if n["finger"] >= 0:
                         fing[(mi, round(n["tick"]), n["pitch"])] = n["finger"]
-    order = unroll(tab)
+    order = unroll(tab) if order is None else list(order)
     notes = []
     for b, mi in enumerate(order):
         m = tab[mi]
@@ -216,24 +218,115 @@ def _local_offset(x, xm, rm, win):
     return np.interp(x, xm, med)
 
 
-def align(gaps_dir, tid, instrument_tuning, tol1=0.25, tol2=0.08, win=2 * TPQ, shifts=range(-5, 6)):
+def bar_similarity(perf_bars: List[List[int]], score_bars: List[List[int]]) -> np.ndarray:
+    """
+    Performed bars x score measures -> pitch-multiset overlap (Dice) in [0, 1].
+    Pitch multisets (not onsets) are used because syncpoints give only bar boundaries; within-bar
+    timing is what we are trying to recover, so it cannot be an input.
+    """
+    pitches = sorted({p for b in perf_bars + score_bars for p in b})
+    col = {p: i for i, p in enumerate(pitches)}
+
+    def hist(bars: List[List[int]]) -> np.ndarray:
+        h = np.zeros((len(bars), max(len(pitches), 1)))
+        for i, b in enumerate(bars):
+            for p in b:
+                h[i, col[p]] += 1
+        return h
+
+    hp, hs = hist(perf_bars), hist(score_bars)
+    inter = np.minimum(hp[:, None, :], hs[None, :, :]).sum(-1)
+    size = hp.sum(1)[:, None] + hs.sum(1)[None, :]
+    return np.where(size > 0, 2 * inter / np.maximum(size, 1), 0.0)
+
+
+def order_from_content(sim: np.ndarray, jump: float = 1.0) -> Tuple[List[int], float]:
+    """
+    Viterbi over score measures: performed bar k -> score measure m_k.
+    Moving to the next measure is free; any other move (repeat / skip) costs `jump`, so a
+    jump is only taken when the following bars match the new place clearly better.
+    -> (score measure per performed bar, mean similarity along the path)
+    """
+    K, M = sim.shape
+    score = sim[0] - jump * (np.arange(M) != 0)            # performances start at measure 0
+    back = np.zeros((K, M), int)
+    for k in range(1, K):
+        adv = np.concatenate([[-np.inf], score[:-1]])        # m-1 -> m (no cost)
+        best = int(np.argmax(score))
+        jmp = score[best] - jump
+        take_adv = adv >= jmp
+        back[k] = np.where(take_adv, np.arange(M) - 1, best)
+        score = np.where(take_adv, adv, jmp) + sim[k]
+    m = int(np.argmax(score))
+    path = [m]
+    for k in range(K - 1, 0, -1):
+        m = int(back[k, m])
+        path.append(m)
+    path = path[::-1]
+    return path, float(np.mean(sim[np.arange(K), path]))
+
+
+def content_order(xml_path: str, sync: list, midi_notes: List[Tuple[float, float, int]],
+                  shifts=range(-5, 6), jump: float = 1.0) -> Tuple[List[int], int, float]:
+    """
+    Score measure order recovered from what was actually played (README17 Ek A).
+    Used when the repeat signs do not reproduce the performed bar count, e.g. a performer
+    repeating whole sections that the score does not mark (common in baroque dances).
+    -> (order, pitch shift, mean bar similarity)
+    """
+    root = ET.parse(xml_path).getroot()
+    n_meas = max(len(p.findall("measure")) for p in root.findall("part"))
+    _, _, notes, _ = score_notes(xml_path, order=range(n_meas))
+    score_bars = [[] for _ in range(n_meas)]
+    for n in notes:
+        score_bars[n["bar"]].append(n["pitch"])
+    starts = dict(sorted((int(e[0]), float(e[1])) for e in sync))
+    n_perf = max(starts) + 1                       # bar k = [sync k, sync k+1); last one is open-ended
+    if len(starts) != n_perf:
+        raise ValueError(f"syncpoint olcu numaralari eksik: {len(starts)} / {n_perf}")
+    edges = np.array([starts[k] for k in range(n_perf)] + [np.inf])
+    best = None
+    for k in shifts:
+        perf_bars = [[] for _ in range(n_perf)]
+        for s, _, p in midi_notes:
+            b = int(np.searchsorted(edges, s, side="right")) - 1
+            if 0 <= b < n_perf:
+                perf_bars[b].append(p - k)
+        order, quality = order_from_content(bar_similarity(perf_bars, score_bars), jump)
+        if best is None or quality > best[2]:
+            best = (order, k, quality)
+    return best
+
+
+def align(gaps_dir, tid, instrument_tuning, tol1=0.25, tol2=0.08, win=2 * TPQ, shifts=range(-5, 6),
+          recover=False):
     """
     Bir GAPS kaydı -> MIDI notası başına partisyon etiketi.
       1) partisyon -> açılmış ölçü/tick -> syncpoint ile saniye (ölçü düzeyi)
       2) kayıt geneli perde kayması (kapo / akort): kaba eşlemeyi en çok artıran k (MIDI − partisyon)
       3) kaba eşleme (tol1) -> yerel zaman düzeltmesi (±win tick kayan medyan; arpej/rubato) -> ince eşleme (tol2)
     Tel = partisyon TAB'ı; perde (fret) = MIDI perdesi − standart açık tel (kapo/akort farkını içerir).
+    recover (README17 Ek A): False = eski davranış birebir. True = tekrar işaretleri çalınan ölçü sayısını
+      vermiyorsa ölçü sırası çalınan içerikten bulunur (content_order). "force" = her kayıtta içerikten
+      (yalnız doğrulama için: tutarlı kayıtlarda eski etiketlerle karşılaştırma).
     -> dict(consistent, shift, n_bars, n_sync, notes=[(başlangıç, bitiş, perde)], string (0 = pes) | -1, fret | -1,
-            finger | -1, dt, order, lens, score_x)
+            finger | -1, dt, order, lens, score_x, order_source, bar_quality)
        Katman 5: order / lens = açılmış ölçü sırası ve uzunlukları (tick); score_x = eşleşen MIDI notasının
        partisyon konumu (açılmış baştan tick) | nan.
     """
     import pretty_midi
-    order, lens, notes, tuning = score_notes(os.path.join(gaps_dir, "musicxml", f"{tid}.xml"))
+    xml = os.path.join(gaps_dir, "musicxml", f"{tid}.xml")
+    order, lens, notes, tuning = score_notes(xml)
     sync = load_sync(gaps_dir, tid)
     n_sync = max(int(e[0]) for e in sync)
     pm = pretty_midi.PrettyMIDI(os.path.join(gaps_dir, "midi", f"{tid}.mid"))
     mn = sorted((float(n.start), float(n.end), int(n.pitch)) for i in pm.instruments if not i.is_drum for n in i.notes)
+    consistent = n_sync in (len(order) - 1, len(order))     # repeat signs reproduce the performed bar count
+    source, quality = "unroll", np.nan
+    if recover == "force" or (recover and not consistent):
+        corder, _, quality = content_order(xml, sync, mn, shifts=shifts)
+        order, lens, notes, tuning = score_notes(xml, order=corder)
+        source = "content"
     t0, x = score_times(sync, lens, notes)
     rate = lambda k: (match_notes([(s, p - k) for s, _, p in mn], notes, t0, tol1)[0] >= 0).mean()
     shift = max(shifts, key=lambda k: (rate(k), -abs(k)))
@@ -253,9 +346,10 @@ def align(gaps_dir, tid, instrument_tuning, tol1=0.25, tol2=0.08, win=2 * TPQ, s
         f = mn[i][2] - instrument_tuning[s]
         if 0 <= f <= 24:
             string[i], fret[i], finger[i] = s, f, notes[j]["finger"]
-    return dict(consistent=n_sync in (len(order) - 1, len(order)), shift=shift, n_bars=len(order), n_sync=n_sync,
+    return dict(consistent=consistent, shift=shift, n_bars=len(order), n_sync=n_sync,
                 notes=mn, string=string, fret=fret, finger=finger, dt=dts, matched=mi >= 0,
-                order=order, lens=lens, score_x=np.where(mi >= 0, x[np.maximum(mi, 0)], np.nan))
+                order=order, lens=lens, score_x=np.where(mi >= 0, x[np.maximum(mi, 0)], np.nan),
+                order_source=source, bar_quality=quality)
 
 
 def time_signatures(xml_path):

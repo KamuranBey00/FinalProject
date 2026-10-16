@@ -38,6 +38,7 @@ giriş katmanı h=1 kanalına taşınır, diğer kanallar 0 -> başlangıçta in
 """
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
@@ -56,7 +57,7 @@ from gtab.models.losses import pitch_index, pitch_probs, pitch_onset_probs, tab_
 from gtab.models.inference import load_model, predict_heads
 from gtab.models.nets import TabCRNNOnset, DEFAULT_HARMONICS, warm_start_state
 from gtab.paths import CACHE_DIR, ckpt_path
-from gtab.utils import set_seed, get_device
+from gtab.utils import set_seed, get_device, guard_new_checkpoint
 
 INSTR = STANDARD_6
 CHUNK = 200
@@ -161,10 +162,12 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           onset_weight=1.0, pitch_weight=1.0, ckpt="tabcrnn_onset.pt", seed=1, pos_weight=3.0,
           harmonics=None, onset_soft=None, gs_pitch_weight=0.0, short_frames=0, short_weight=1.0,
           repeat_weight=1.0, repeat_gap=3, offset_weight=0.0, valley_weight=1.0, frag_weight=1.0, oversample=1.0, deep=0,
-          pitch_onset_weight=0.0, new_lr_mult=1.0, gaps_tab_weight=0.0):
+          pitch_onset_weight=0.0, new_lr_mult=1.0, gaps_tab_weight=0.0, overwrite=False,
+          string_weights=None, save_epochs=False, prior_debias=0.0, prior_cap=3.0, hex_weight=0.0):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
+    guard_new_checkpoint(ckpt, overwrite)       # epoch 0 saves immediately -> check before any work
     ncls = n_tab_classes(INSTR)
     idx = pitch_index(INSTR).to(device)
 
@@ -177,6 +180,11 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           f" | GAPS perde agirligi {pitch_weight} | offset kafasi agirligi {offset_weight}")
     print(f"Katman 3.11 Adim 4: vadi agirligi x{valley_weight} | fragman agirligi x{frag_weight} | "
           f"hizli tekrar parcasi ornekleme x{oversample}")
+    # README17 Ek A: per-string weight on note cells of the tab loss (None = old training, identical)
+    sw = None
+    if string_weights is not None:
+        sw = torch.tensor(string_weights, dtype=torch.float32, device=device).view(1, 1, -1)
+        print(f"README17 Ek A: tel kaybi agirliklari (E A D G B e) = {list(string_weights)}")
     gs_frag = gaps_frag = None
     if frag_weight != 1.0:
         print(f"  fragman taramasi: {init} egitim verisinde (bir kez)")
@@ -184,7 +192,13 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     tab_ds = GuitarSetSeq(CACHE_DIR, tab_splits, CHUNK, onsets=True, onset_soft=onset_soft,
                           short_frames=short_frames, short_weight=short_weight,
                           repeat_weight=repeat_weight, repeat_gap=repeat_gap,
-                          valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gs_frag)
+                          valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gs_frag,
+                          hex_dir=str(Path(CACHE_DIR) / "hex") if hex_weight > 0 else None)
+    if hex_weight > 0:
+        print(f"README17 Ek A: hex tel spektrumu yardimci kaybi x{hex_weight} | hex'li parca "
+              f"{sum(tab_ds.has_hex)}/{len(tab_ds)} (build_hex calisti mi?)")
+        if not any(tab_ds.has_hex):
+            raise SystemExit("HATA: data/cache/hex bos; once: python -m scripts.data.build_hex")
     tab_dl = make_loader(tab_ds, batch_size, oversample)
     gs_val = DataLoader(GuitarSetSeq(CACHE_DIR, "val", CHUNK, onsets=True, onset_soft=onset_soft),
                         batch_size=batch_size)
@@ -221,6 +235,27 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                  if harmonics and not init_ck.get("harmonics") else ""))
 
     w = tab_ds.class_weights(ncls, scheme="inv", cap=20.0).to(device)
+    # README17 Ek A: the model picks strings largely from "which string do training players use for this
+    # pitch". Up-weight note cells whose (pitch, string) is rare for that pitch so the decision has to
+    # come from timbre. weight = share^-alpha, clipped to [1, cap]; alpha 0 = off (old training).
+    pw = None
+    if prior_debias > 0:
+        S = INSTR.num_strings
+        cnt = np.zeros((128, S))
+        for _, tb, _ in tab_ds.items:
+            tb = np.asarray(tb)
+            for st in range(S):
+                v = tb[:, st]
+                np.add.at(cnt[:, st], INSTR.tuning[st] + v[v > 0] - 1, 1)
+        # relative to the most common string of that pitch: the majority choice keeps weight 1,
+        # only minority choices are boosted (absolute share boosted ~93% of all cells -> untargeted)
+        share = cnt / np.maximum(cnt.max(1, keepdims=True), 1)
+        pw = torch.tensor(np.clip(np.where(cnt > 0, share, 1.0) ** -prior_debias, 1.0, prior_cap),
+                          dtype=torch.float32, device=device)
+        tun = torch.tensor(INSTR.tuning, device=device).view(1, 1, -1)
+        s_idx = torch.arange(S, device=device).view(1, 1, -1)
+        print(f"README17 Ek A: tel onseli dengeleme alpha={prior_debias} cap={prior_cap} | "
+              f"agirlikli hucre payi (w>1) %{100 * (cnt * (pw.cpu().numpy() > 1)).sum() / cnt.sum():.1f}")
     ce = torch.nn.CrossEntropyLoss(weight=w, ignore_index=PAD, reduction="none")
     bce = torch.nn.BCELoss(reduction="none")
     # seyrek onset pozitiflerini dengele (karelerin ~%5'i)
@@ -228,17 +263,23 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     # Katman 3.12: init'te olmayan (sıfırdan) katmanlar ayrı grupta, lr x new_lr_mult
     new_p = [p for n_, p in model.named_parameters() if n_ in set(missing)]
     old_p = [p for n_, p in model.named_parameters() if n_ not in set(missing)]
+    # README17 Ek A: auxiliary hex head lives OUTSIDE the model, so saved checkpoints stay inference-compatible
+    hex_head = None
+    if hex_weight > 0:
+        n_hex = tab_ds.hex[0].shape[1] * tab_ds.hex[0].shape[2]
+        hex_head = torch.nn.Linear(model.head.in_features, n_hex).to(device)
+        new_p = new_p + list(hex_head.parameters())
     opt = torch.optim.Adam([{"params": old_p, "lr": lr}] +
                            ([{"params": new_p, "lr": lr * new_lr_mult}] if new_p else []))
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
     state = {}
 
-    def save():
+    def save(path=None):
         torch.save({"model": model.state_dict(), "n_classes": ncls, "onset": True, "offset": use_off,
                     "deep": deep, "pitch_onset": use_pon,
                     "onset_thr": state.get("thr"), "harmonics": list(harmonics) if harmonics else None,
-                    "onset_soft": onset_soft}, ckpt)
+                    "onset_soft": onset_soft}, path or ckpt)
 
     def score(ep, logs):
         m, bt = evaluate(model, gs_val, gp_val, idx, device)
@@ -261,9 +302,17 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         model.train()
         sums = dict(tab=0.0, on=0.0, off=0.0, gsperde=0.0, perde=0.0, ponset=0.0, poffset=0.0); n = 0
         p_iter = iter(p_tr) if p_tr is not None else None
-        for x, y, on, wt, ow, _ in tab_dl:
-            x, y, on, wt, ow = x.to(device), y.to(device), on.to(device), wt.to(device), ow.to(device)
-            tab, ol, offl, pl = model.forward_full(x)
+        for batch in tab_dl:
+            x, y, on, wt, ow = (t.to(device) for t in batch[:5])
+            if sw is not None:                         # only cells where a note sits on that string
+                wt = torch.where(y > 0, wt * sw, wt)
+            if pw is not None:
+                cell_w = pw[(tun + y - 1).clamp(0, 127), s_idx.expand_as(y)]
+                wt = torch.where(y > 0, wt * cell_w, wt)
+            if hex_head is None:
+                tab, ol, offl, pl = model.forward_full(x)
+            else:
+                tab, ol, offl, pl, feats = model.forward_full(x, return_features=True)
             B, L, S, C = tab.shape
             # tel CE: sınıf ağırlığı x kısa nota ağırlığı (wt=1 -> eski ağırlıklı ortalama, birebir)
             yv = y.reshape(-1); cw = w[yv.clamp(min=0)] * (yv != PAD)
@@ -272,6 +321,14 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
             l_on = (bce_logit(ol, on) * valid * ow).sum() / (valid.sum() * S)   # ow = kısa x tekrar (varsayılan = wt)
             loss = l_tab + onset_weight * l_on
             sums["tab"] += l_tab.item(); sums["on"] += l_on.item()
+            if hex_head is not None:                   # README17 Ek A: mic features -> per-string hex spectra
+                hx, has = batch[6].to(device), batch[7].to(device)
+                fm = (y[:, :, 0] != PAD) & has.view(-1, 1)
+                if fm.any():
+                    pred = torch.sigmoid(hex_head(feats)).view_as(hx)
+                    l_hex = ((pred - hx) ** 2).mean((-1, -2))[fm].mean()
+                    loss = loss + hex_weight * l_hex
+                    sums["hex"] = sums.get("hex", 0.0) + l_hex.item()
             if offset_weight > 0:                      # Adım 3c: tel offset'i (son kare chunk sınırı -> maske)
                 ot_, om_ = string_offset_target(y, on, onset_soft)
                 vm = valid * om_.unsqueeze(-1)
@@ -326,6 +383,8 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
             opt.zero_grad(); loss.backward(); opt.step(); n += 1
         sched.step()
         s = score(ep, {k: v / max(n, 1) for k, v in sums.items() if v})
+        if save_epochs:                                # README17 Ek A: every epoch, for external selection metrics
+            save(str(Path(ckpt).with_name(f"{Path(ckpt).stem}_ep{ep}.pt")))
         if s > best:
             best = s; state["thr"] = state["cur_thr"]; save()
     print(f"En iyi secim skoru: {best:.3f} -> {ckpt} | dogrulamada secilen onset esigi: {state['thr']}")
@@ -342,6 +401,15 @@ if __name__ == "__main__":
     ap.add_argument("--onset-weight", type=float, default=1.0)
     ap.add_argument("--pitch-weight", type=float, default=1.0)
     ap.add_argument("--ckpt", default="tabcrnn_onset.pt")
+    ap.add_argument("--overwrite", action="store_true", help="--ckpt zaten varsa bilerek ez (varsayilan: dur)")
+    ap.add_argument("--seed", type=int, default=1, help="rastgelelik tohumu (varsayilan 1 = onceki tum egitimler)")
+    ap.add_argument("--string-weights", default="", help="README17 Ek A: tel basina kayip agirligi 'E,A,D,G,B,e' (bos = hepsi 1)")
+    ap.add_argument("--save-epochs", action="store_true", help="her epoch'u <ckpt>_epN.pt olarak da kaydet")
+    ap.add_argument("--prior-debias", type=float, default=0.0,
+                    help="README17 Ek A: (perde, tel) egitimde nadirse agirlik = (pay / en sik telin payi)^-alpha (0 = kapali)")
+    ap.add_argument("--prior-cap", type=float, default=3.0, help="--prior-debias agirlik ust siniri")
+    ap.add_argument("--hex-weight", type=float, default=0.0,
+                    help="README17 Ek A: GuitarSet hex tel spektrumu yardimci kaybi (0 = kapali; build_hex gerekir)")
     ap.add_argument("--pos-weight", type=float, default=3.0, help="onset BCE pozitif agirligi")
     ap.add_argument("--harmonics", default="", help="ornek '0.5,1,2,3,4,5' ya da 'default'; bos = init'teki ayar")
     # Katman 3.10 Adim 2 (varsayilanlar = Katman 3.9 egitimi, birebir)
@@ -367,7 +435,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
-          a.onset_weight, a.pitch_weight, a.ckpt, pos_weight=a.pos_weight,
+          a.onset_weight, a.pitch_weight, a.ckpt, seed=a.seed, pos_weight=a.pos_weight,
           harmonics=(DEFAULT_HARMONICS if a.harmonics == "default"
                      else tuple(float(h) if "." in h else int(h) for h in a.harmonics.split(",")) if a.harmonics else None),
           onset_soft=a.onset_soft, gs_pitch_weight=a.gs_pitch_weight,
@@ -375,4 +443,7 @@ if __name__ == "__main__":
           repeat_weight=a.repeat_weight, repeat_gap=a.repeat_gap, offset_weight=a.offset_weight,
           valley_weight=a.valley_weight, frag_weight=a.frag_weight, oversample=a.oversample,
           deep=a.deep, pitch_onset_weight=a.pitch_onset_weight, new_lr_mult=a.new_lr_mult,
-          gaps_tab_weight=a.gaps_tab_weight)
+          gaps_tab_weight=a.gaps_tab_weight, overwrite=a.overwrite,
+          string_weights=tuple(float(v) for v in a.string_weights.split(",")) if a.string_weights else None,
+          save_epochs=a.save_epochs, prior_debias=a.prior_debias, prior_cap=a.prior_cap,
+          hex_weight=a.hex_weight)

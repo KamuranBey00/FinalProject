@@ -104,11 +104,25 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   (tarayıcı), `eval_taps --dir data/taps`; gecikme araması uyarlamalı (≤ 300 ms, ≤ 0.4 × dokunuş aralığı; Bluetooth).
   **Gerçek dokunuş (13 Ekim, kullanıcı müzisyen değil, 4 kayıt):** tap modu vuruş F 0.196 / IOI 0.488 (dokunuşlar vuruşa
   kilitli değil, yalnız kaba tempo) → tap modu ileri seçenek; **"tap tempo"** (dokunuşlardan BPM → yarı otomatik) IOI 0.702 ≈
-  BPM bilinen 0.741 → ürün varsayılanı: ölçü imi + BPM / tap tempo. Adım 3 KAPANDI; sırada kullanıcı kararı (Katman 4 / AlphaTab).
+  BPM bilinen 0.741 → ürün varsayılanı: ölçü imi + BPM / tap tempo. Adım 3 KAPANDI; dal `katman-5.1-tap-modu` (`c16dbc6`).
+- **Armağan birleşimi + yapı düzenlemesi (15–16 Ekim, README17 Ek A / Ek B):** `origin/Armagan-katman-4`'ten yalnız kod / test
+  alındı (devlogları alınmadı): `tests/` (204 test), `check_protocol`, `check_inference_regression`, `gaps_score` içerikten
+  ölçü sırası (`build_gaps_tab --recover-repeats` → `gaps_tab_rec` 236 kayıt), eğitim ezme koruması (`--overwrite`), ASCII TAB
+  düzeltmesi → `scripts/app/transcribe_ascii.py` (+ `--meter --taps/--bpm` ölçü çizgileri), çalınabilirlik metrikleri,
+  Katman 4 hazırlığı (protokol, F0 konturu; GuitarSet/GAPS'te teknik etiketi yok). Ses modu tel seçimi `w_transition` 0
+  (ölçülen ayar). **Model yığını:** `gtab/models/stack.py` + `checkpoints/active.json`; varsayılanlar buradan;
+  `python -m scripts.eval.check_stack` taban değişince eskiyen kalibrasyon / BeatNet / parmak izini ve komutlarını yazar.
+  `eval_pitch --splits` varsayılanı gaps_val (gaps_test yalnız açıkça). **Açık notlar:** A teli (deep2 0.641) ileride;
+  tremolo Katman 4'te (teknik veri hazır olunca); `edition_seq_rec.pt` (gaps_val 0.784 / 0.700) ürüne alınacak, acelesi yok;
+  Katman 6'da çıkan sorunlar Katman 6'da çözülür.
+- **Katman 6 sürüyor (16 Ekim, `docs/devlog/README18.md`; kullanıcı kararı: Katman 4 teknik verisi hazır olunca, önce 6):**
+  gerçek dünya = kayıt koşulu (yankı / telefon / gürültü; `gtab/data/degrade.py`), polifoni, akort, kendi kayıtlarımız
+  (`docs/KAYIT_PROTOKOLU.md`, E01–E15; teknik egzersizleri de içinde). Adım 0 `eval_robust` kodlandı (duman testi: yankı 0.5 sn
+  −0.06, telefon −0.03) → **kullanıcı ölçümü bekleniyor**; karar kuralı README18.
 - **Temizlik (10 Ekim):** eski / reddedilen kod `archive/` (bkz. `archive/README.md`), eski checkpoint'ler
   `checkpoints/archive/`. Aktif: data betikleri, `train_onset`, `train_edition_seq`, `eval_pitch`, `diagnose_pitch`,
   `eval_hmm`, `eval_edition`; checkpoint `tabcrnn_deep2.pt` (+cal), `edition_seq.pt`, `transitions.npz`.
-  `load_model` varsayılanı artık `tabcrnn_deep2.pt`. Eski checkpoint: `--ckpt checkpoints/archive/<ad>.pt`.
+  `load_model` varsayılanı aktif yığından (`checkpoints/active.json`; şimdi `tabcrnn_deep2.pt`). Eski checkpoint: `--ckpt checkpoints/archive/<ad>.pt`.
   Aşağıdaki maddeler geçmiş kayıttır (adı geçen eski dosyalar arşivde).
 - **Eski taban: `checkpoints/tabcrnn_rep_off.pt`** (TabCRNNOnset + harmonik istifleme + offset kafası;
   tabcrnn_poly'den `train_onset --repeat-weight 3 --pitch-weight 2 --offset-weight 1`).
@@ -162,7 +176,7 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   kabul ✓ → **3.12 KAPANDI**, taban `tabcrnn_deep2.pt` (README13 Karar).
   Hız: kalibrasyon seçimi değişmediyse her zaman `--load-cal` kullan (tam kalibrasyon ~1 saat).
   val_comp tekrar kaçma <100 ms 72.5 → 22.5 ama GS val nota −0.014. `.venv`'e CUDA torch kuruldu (requirements.txt cu121).
-- Tel tarafı (gerekirse): A teli 0.66; adaylar 36 bin/oktav önbellek, hex öğretmen
+- Tel tarafı (gerekirse): A teli (solo, oracle) `tabcrnn_gaps` 0.600 → deep2 0.641 (kapanmadı, ileride); adaylar 36 bin/oktav önbellek, hex öğretmen
   damıtması, SynthTab naylon + GAPS partisyon TAB etiketleri (`.match`).
 - **Denenmiş, işe yaramayan (tekrarlama):** el yapımı Viterbi hareket maliyeti;
   öğrenilen geçiş önseli güçlü modellerde katkısız; CQT perde kaydırmalı çoğaltma (−0.06);

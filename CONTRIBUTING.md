@@ -75,7 +75,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 |---|---|
 | `config.py` | Ses/CQT sabitleri (22050 Hz, hop 512, 192 bin, 24 bin/oktav). Değiştirmek tüm modelleri geçersiz kılar. |
 | `paths.py` | Proje yolları; checkpoint adlarını çözer |
-| `utils.py` | Seed, cihaz seçimi |
+| `utils.py` | Seed, cihaz seçimi, `guard_new_checkpoint` (eğitimin mevcut checkpoint'i ezmesini engeller) |
 | `core/instrument.py` | Akort ve "bu perde hangi tel/perdelerde çalınır" mantığı |
 | `core/note_event.py` | Tüm katmanların paylaştığı nota şeması (`NoteEvent`, `Transcription`) |
 | `data/features.py` | Ses → log-CQT |
@@ -88,7 +88,8 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/rhythm_labels.py` | Ritim etiketleri: GAPS partisyon konumundan rubato'lu vuruş / ölçü başı + nota başına vuruş konumu; GuitarSet JAMS vuruşları (Katman 5) |
 | `models/nets.py` | PitchCNN, TabCNN, TabCRNN, TabCRNNOnset, HarmonicStack; eski ağırlıklardan sıcak başlatma |
 | `models/losses.py` | Tel olasılıklarından perde ve perde-onset olasılığı (perde etiketli veride kayıp için) |
-| `models/inference.py` | Model yükleme (türü checkpoint'ten tanır; varsayılan `tabcrnn_deep2.pt`), uzun kayıtlarda parça parça çıkarım |
+| `models/inference.py` | Model yükleme (türü checkpoint'ten tanır; varsayılan aktif yığından), uzun kayıtlarda parça parça çıkarım |
+| `models/stack.py` | Aktif model yığını (`checkpoints/active.json`) + bağımlılık denetimi: taban ses modeli ↔ kalibrasyon, BeatNet, BeatNet önbelleği, regresyon parmak izi |
 | `models/edition_net.py` | "Klasik edisyon önerisi": nota dizisi → tel/perde + sol el parmağı (iki yönlü dizi modeli) |
 | `decoding/decode.py` | Olasılık → nota → ASCII TAB; nota başına tel seçimi |
 | `decoding/viterbi.py` | Perde matrisi, nota bulma (eşik tabanlı ve onset tabanlı), el yapımı Viterbi |
@@ -98,8 +99,15 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `decoding/edition.py` | Edisyon önerisi için nota dizisi yardımcıları (akor gruplama, etiket okuma, taban parmak kuralı) |
 | `decoding/rhythm.py` | Ritim (Katman 5): başlangıç zarfları, vuruş takibi (dp / plp), ölçü başı + ölçü, kuantalama (vuruş içi bölüm seçimi) |
 | `decoding/beat_dbn.py` | Bar-pointer DBN (tempo × ölçü içi konum × ölçü 1–4; tek karelik vuruş bölgesi) + tepe seçimi tabanı |
-| `decoding/taps.py` | Tap modu (Katman 5 Adım 3): dokunuşlar → vuruşlar (gecikme, fazla / kaçan dokunuş) + ölçü fazı Viterbi'si |
+| `decoding/taps.py` | Tap modu (Katman 5 Adım 3): dokunuş dosyası okuma, dokunuşlar → vuruşlar (gecikme, fazla / kaçan dokunuş) + ölçü fazı Viterbi'si |
+| `decoding/playability.py` | Çalınabilirlik metrikleri (zamanda örtüşen çiftlerde parmak çakışması, el açıklığı, ters parmak sırası, barre, pozisyon kayması) |
+| `data/degrade.py` | Kayıt koşulu bozulmaları (yankı, telefon, gürültü; Katman 6) |
+| `data/hex.py` | GuitarSet hex kaydı → tel başına spektrum (yardımcı eğitim hedefi) |
+| `data/contour.py` | Sürekli F0 konturu (Katman 4 hazırlığı): cent dönüşümü, nota–kontur hizalaması, kalite bayrakları |
 | `evaluation/metrics.py` | Ortak metrikler (P/R/F1, tab F1, onset F1) |
+| `evaluation/protocol.py`, `selection.py` | Değerlendirme protokolü: split kapıları (gaps_test seçimde kullanılamaz), karantina, seçim kuralları |
+| `evaluation/technique_eval.py` | Teknik değerlendirme (Katman 4): nota olayı eşleme, sınıf başına P/R/F1, macro-F1 |
+| `evaluation/baselines.py`, `fingerprint.py` | Referans tablo (`docs/baselines/d1_baseline.json`) ve çıkarım parmak izi |
 | `evaluation/rhythm_metrics.py` | Ritim metrikleri: vuruş / ölçü başı F, CMLt / AMLt, tempo Acc1/2, konum ve IOI (nota değeri) doğruluğu |
 | `evaluation/pitch_eval.py` | Perde/nota değerlendirme çekirdeği: alan-içi kalibrasyon (GuitarSet→val, GAPS→gaps_val), çözümleme kuralı araması, 50/100 ms nota F1 |
 | `render/score.py` | Ölçülü TAB modeli (Katman 5 Adım 2): konumlar + ölçü başı + ölçü imi → ölçüler, bağlar, nota değerleri |
@@ -112,25 +120,35 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/get_guitarset.py`, `data/get_gaps.py` | Veri setlerini indirir |
 | `data/build_guitarset.py`, `data/build_tab_labels.py`, `data/build_comp.py` | GuitarSet solo ve akorlu kayıt önbelleği |
 | `data/build_gaps.py` | GAPS önbelleği (`--disjoint` = icracı-ayrık) |
-| `data/build_gaps_tab.py` | GAPS partisyon TAB + parmak etiketleri → `data/cache/gaps_tab/` |
+| `data/build_gaps_tab.py` | GAPS partisyon TAB + parmak etiketleri → `data/cache/gaps_tab/`; `--recover-repeats` → `gaps_tab_rec/` (içerikten ölçü sırası, 236 kayıt) |
+| `data/build_hex.py`, `data/build_contour.py` | Hex tel spektrumu ve F0 konturu önbellekleri |
 | `data/build_rhythm.py` | Ritim etiketleri (GAPS + GuitarSet) → `data/cache/rhythm/` |
 | `data/build_beat_feats.py` | deep2 gövde temsili önbelleği → `data/cache/beat_feats/<ckpt>/` (vuruş ağı girdisi) |
 | `train/train_onset.py` | Ses modeli eğitimi (onset/offset/perde-onset kafaları, derin CNN; güncel taban deep2) |
 | `train/train_edition_seq.py` | Edisyon önerisi dizi modeli (sembolik, ~2 dk) |
 | `train/train_rhythm_q.py` | Bağlamlı kuantalayıcı (sembolik, vuruş/nota bozma artırması; ~11 dk) → `rhythm_q.pt` |
 | `train/train_beat.py` | Vuruş + ölçü başı ağı (tempo artırması, DBN ayar taraması) → `beat_net.pt` |
-| `eval/eval_pitch.py` | Nota ve kare F1, polifoni kırılımı, kalibrasyon (`--save-cal` / `--load-cal`) |
+| `eval/eval_pitch.py` | Nota ve kare F1, polifoni kırılımı, kalibrasyon (`--save-cal` / `--load-cal`); varsayılan splitler gaps_val val val_comp (gaps_test yalnız açıkça) |
 | `eval/diagnose_pitch.py` | Kaçan/hayalet notaların nedeni, hızlı tekrarlar, tepe görünürlüğü |
 | `eval/eval_hmm.py` | Tel ataması teşhisi + uçtan uca tab F1 (**ana GuitarSet ölçümü**) + `--demo` |
 | `eval/eval_edition.py` | Edisyon önerisi: tel uyumu, parmak (ürün sayısı), uçtan uca (deep2 notaları) |
 | `eval/eval_score.py` | Ölçülü TAB: MusicXML gidiş-dönüş + uçtan uca ölçü içi konum (Adım 2) + ölçü kaydırma tavanı + tap modu simülasyonu (Adım 3) |
 | `app/tap_recorder.html` | Tarayıcıda dokunuş kaydedici (tap modu): ses çal, BOŞLUK ile vuruşlar → `<kayıt>.txt` |
 | `app/transcribe.py` | Ürün komutu: ses (ya da .npz) + `--bpm` ya da `--taps` + `--meter` (+ `--mode`, `--shift`) → `.musicxml` |
+| `app/transcribe_ascii.py` | Ses → nota tablosu + ASCII TAB (`--fingering`; `--meter` + `--taps` / `--bpm` ile ölçü çizgileri) |
+| `eval/check_stack.py` | Model yığını denetimi (`--set` ile yeni taban); eskiyen parçalar için yeniden üretme komutları |
+| `eval/check_protocol.py`, `eval/check_inference_regression.py` | Veri envanteri + split kapıları; deep2 çıkarım çıktısı referansla birebir mi |
+| `eval/eval_robust.py` | Katman 6 Adım 0: yapay kayıt koşullarında nota / kare / polifoni F1 (gaps_val) |
+| `eval/eval_playability.py` | Çalınabilirlik (model / naif / editör; gaps_val) |
+| `eval/inventory_technique.py`, `eval/probe_gaps_f0.py` | Katman 4 hazırlığı: teknik etiket envanteri, GAPS F0 yoklaması |
 | `eval/eval_taps.py` | Tap modu gerçek dokunuşla ölçüm (dokunulan aralıkta; yarı otomatik + simüle karşılaştırması) |
 | `eval/eval_rhythm.py` | Ritim: kuantalayıcı tavanı, vuruş takibi, ölçü başı, kuantalama zinciri (Katman 5); `--qnet` ile 1q, `--beatnet` ile 1b satırları |
 
 Eski katmanların betikleri (Katman 2–3.8 eğitimleri, tamamlanmış tanılamalar, SynthTab hattı, reddedilen
 adımlar) `archive/` altında; liste ve çalıştırma için `archive/README.md`.
+
+### `tests/`
+`python -m unittest discover -s tests -t .` (204 test; veri/model gerektirenler yoksa atlanır).
 
 ### `checkpoints/`
 | Dosya | Katman | Not |
@@ -138,6 +156,9 @@ adımlar) `archive/` altında; liste ve çalıştırma için `archive/README.md`
 | **`tabcrnn_deep2.pt`** + `tabcrnn_deep2.cal.json` | 3.12 | **Güncel ses tabanı** ("duyulan konum"): GS tab F1 0.777, GAPS nota/kare 0.779 / 0.701; kalibrasyon seçimi (`--load-cal`) |
 | **`edition_seq.pt`** | 3.13 | "Klasik edisyon önerisi": GAPS tel 0.815, parmak 0.636 (ürün tam 0.434) |
 | `transitions.npz` | 3.6b | öğrenilen tel geçiş modeli (`eval_hmm`) |
+| `rhythm_q.pt`, `beat_net.pt` | 5 | bağlamlı kuantalayıcı; vuruş ağı (deep2 temsiline bağlı) |
+| `edition_seq_rec.pt` | 3.13 (Armağan) | aday parmak modeli (gaps_val tel / parmak 0.784 / 0.700); ürüne alınacak |
+| `active.json` (isteğe bağlı) | — | aktif model yığını; yoksa `gtab/models/stack.py` varsayılanı |
 | `archive/*` | 2 – 3.13 | eski tabanlar ve reddedilen modeller (pitchcnn … rep_valley, deep, gtab, edition.npz) |
 
 ## Çalışma kuralları

@@ -310,18 +310,25 @@ if __name__ == "__main__":
     ap.add_argument("--re-valley", type=float, default=0.0, help="Katman 3.11 Adim 1b: vadi kaniti (0 = kapali)")
     ap.add_argument("--onset-source", default="string", choices=["string", "pitch"],
                     help="Katman 3.12: nota bulma tel-onset yolundan mi perde-onset kafasindan mi")
+    ap.add_argument("--load-cal", default=None,
+                    help="kalibrasyon dosyasi (.cal.json); 'val' alanindaki esik + onset esigi + cozumleme "
+                         "kurallari okunur, yukaridaki elle verilen kural bayraklarinin YERINE gecer")
     args = ap.parse_args()
+    dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
+               rise_keep=args.rise_keep, rise_split=args.rise_split,
+               offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
+               prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley,
+               onset_source=args.onset_source)
+    if args.load_cal:
+        # eval_hmm measures GuitarSet val only, so the 'val' domain is the matching calibration
+        from gtab.evaluation.pitch_eval import load_selection
+        sel = load_selection(ckpt_path(args.load_cal))
+        if "val" not in sel:
+            raise SystemExit(f"HATA: {args.load_cal} icinde 'val' alani yok; mevcut: {sorted(sel)}")
+        _, args.threshold, args.onset_thr, cal_dec = sel["val"]
+        dec = dict(cal_dec)
+        print(f"Kalibrasyon dosyadan: {args.load_cal} [val] -> esik {args.threshold} | onset esigi {args.onset_thr}")
     if args.demo:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
-                   rise_keep=args.rise_keep, rise_split=args.rise_split,
-                   offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
-                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley,
-                   onset_source=args.onset_source)
         demo(args.demo, args.model, args.threshold, args.w_transition, args.ckpt, args.onset_thr, dec)
     else:
-        dec = dict(off_ratio=args.off_ratio, refractory=args.refractory, fallback=args.fallback, peak=args.peak, reattack=args.reattack,
-                   rise_keep=args.rise_keep, rise_split=args.rise_split,
-                   offset_threshold=args.offset_thr, combine=args.combine, peak_pick=args.peak_pick,
-                   prominence=args.prominence, min_dist=args.min_dist, re_valley=args.re_valley,
-                   onset_source=args.onset_source)
         main(args.model, args.quick, args.refit, args.ckpt, args.onset_thr, dec)
