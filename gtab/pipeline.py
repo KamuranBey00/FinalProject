@@ -17,6 +17,7 @@ from gtab.core.instrument import STANDARD_6
 from gtab.data.torch_dataset import _normalize
 from gtab.decoding.beat_dbn import dbn_decode
 from gtab.decoding.edition import order_notes
+from gtab.decoding.retune import remap_probs
 from gtab.decoding.taps import meter_phase, taps_to_beats
 from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice
 from gtab.decoding.viterbi import energy_rise, segment
@@ -54,8 +55,26 @@ def load_models(device, domain="gaps_val", **override):
                 tm=tm, device=device)
 
 
-def analyze(cqt, m, mode="ses"):
-    """Ses aşaması (bir kez): -> dict(notes (N, 3) sn, string, fret, finger (N,) (-1 = yok), act (T, 3) vuruş aktivasyonu)."""
+def heard_positions(segs, probs, tm, instrument=STANDARD_6, w_transition=0.0):
+    """
+    "Ses" modu tel/perde (Katman 6 Adım 3): segs (kare başı, sonu, perde), probs standart akort tel olasılıkları, tm standart
+    akort geçiş modeli -> nota başına (tel, perde) | (None, None). instrument = kullanıcı akortu (kapo dahil, with_capo;
+    perdeler kapodan): olasılıklar remap_probs ile taşınır, geçiş modeli o akortta ağırlıksız kurulur (öğrenilen ağırlıklar
+    standart akortta eğitildi) -> yalnız w_transition = 0. Standart akortta eski yol birebir.
+    """
+    if tuple(instrument.tuning) != tuple(tm.instrument.tuning) or instrument.num_frets != tm.instrument.num_frets:
+        if w_transition != 0:
+            raise ValueError("standart disi akortta ogrenilen gecis modeli yok: w_transition 0 olmali")
+        probs, tm = remap_probs(probs, tm.instrument, instrument), TransitionModel(instrument)
+    return decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
+
+
+def analyze(cqt, m, mode="ses", instrument=STANDARD_6):
+    """
+    Ses aşaması (bir kez): -> dict(notes (N, 3) sn, string, fret, finger (N,) (-1 = yok), act (T, 3) vuruş aktivasyonu).
+    instrument: kullanıcı akortu (kapo dahil; perdeler kapodan). Akustik çözümleme her zaman STANDARD_6 (model çıkışı);
+    akort yalnız konum aşamasında (heard_positions / EditionNet). Modelin perde aralığı (E2..E6) dışı notalar bulunmaz.
+    """
     dev = m["device"]
     _, thr, ot, rules = m["sel"]
     x = _normalize(cqt)
@@ -66,12 +85,12 @@ def analyze(cqt, m, mode="ses"):
     N = len(notes)
     string, fret, finger = np.full(N, -1), np.full(N, -1), np.full(N, -1)
     if N and mode == "ses":
-        for i, (s, f) in enumerate(decode_lattice(build_lattice(segs, probs, m["tm"]), 1.0, 0.0)):
+        for i, (s, f) in enumerate(heard_positions(segs, probs, m["tm"], instrument)):
             if s is not None:
                 string[i], fret[i] = s, f
     elif N and mode == "edisyon":
         o, chord = order_notes(notes)
-        s, f, g = edition_predict(m["edition"], notes[o], chord, dev)
+        s, f, g = edition_predict(m["edition"], notes[o], chord, dev, instrument=instrument)
         string[o], fret[o], finger[o] = s, f, np.where(s >= 0, g, -1)
     elif N:
         raise ValueError(mode)
@@ -102,10 +121,11 @@ def rhythm(an, m, sig, bpm=None, taps=None, tol=USER_TOL, trans=USER_TRANS, shif
                 downbeat_index=d0 + shift)
 
 
-def transcribe(cqt, m, bpm, sig, mode="ses", tol=USER_TOL, trans=USER_TRANS, shift=0, taps=None):
+def transcribe(cqt, m, bpm, sig, mode="ses", tol=USER_TOL, trans=USER_TRANS, shift=0, taps=None, instrument=STANDARD_6):
     """
     cqt (T, n_bins) dB, m = load_models(...), bpm = vuruş/dk (vuruş birimi: x/4 çeyrek, x/2 ikilik, bileşik x/8 noktalı
-    çeyrek; taps verilirse kullanılmaz), sig = (pay, payda) -> analyze + rhythm sözlükleri birleşik.
+    çeyrek; taps verilirse kullanılmaz), sig = (pay, payda), instrument = kullanıcı akortu (kapo dahil) -> analyze + rhythm
+    sözlükleri birleşik.
     """
-    an = analyze(cqt, m, mode)
+    an = analyze(cqt, m, mode, instrument)
     return dict(an, **rhythm(an, m, sig, bpm, taps, tol, trans, shift))

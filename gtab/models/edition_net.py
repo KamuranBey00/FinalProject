@@ -20,11 +20,14 @@ P_LO, N_P = INSTR.tuning[0], 49                      # perde gömmesi: E2 .. E6
 N_FRET = INSTR.num_frets + 1
 
 
-def note_features(notes, chord):
-    """(N,3) sıralı notalar + akor bayrağı -> (perde indeksi (N,), sürekli özellikler (N, 12), geçerli tel (N, 6))."""
+def note_features(notes, chord, instrument=INSTR):
+    """
+    (N,3) sıralı notalar + akor bayrağı -> (perde indeksi (N,), sürekli özellikler (N, 12), geçerli tel (N, 6)).
+    instrument: geçerli teller bu akortta (Katman 6 Adım 3; model standart akortta eğitildi, başka akort dağılım dışı).
+    """
     notes = np.asarray(notes, float); N = len(notes)
     p = notes[:, 2].astype(int)
-    valid = np.array([[0 <= q - t <= INSTR.num_frets for t in INSTR.tuning] for q in p], bool).reshape(N, 6)
+    valid = np.array([[0 <= q - t <= instrument.num_frets for t in instrument.tuning] for q in p], bool).reshape(N, 6)
     grp = np.cumsum(~np.asarray(chord, bool)) - 1
     size = np.bincount(grp)[grp]
     first = np.r_[0, np.flatnonzero(np.diff(grp)) + 1]
@@ -36,11 +39,11 @@ def note_features(notes, chord):
     return np.clip(p - P_LO, 0, N_P - 1), cont, valid
 
 
-def position_features(strings, notes):
-    """Konum (tel indeksi | -1) -> (N, 6 + 25 + 1): tel one-hot, perde one-hot, bilinmiyor."""
+def position_features(strings, notes, instrument=INSTR):
+    """Konum (tel indeksi | -1) -> (N, 6 + 25 + 1): tel one-hot, perde one-hot (instrument akortunda), bilinmiyor."""
     N = len(strings); x = np.zeros((N, 6 + N_FRET + 1), np.float32)
     for i, s in enumerate(strings):
-        f = int(notes[i, 2]) - INSTR.tuning[s] if s >= 0 else -1
+        f = int(notes[i, 2]) - instrument.tuning[s] if s >= 0 else -1
         if not 0 <= f < N_FRET:                      # bilinmiyor / gitar aralığı dışı
             x[i, -1] = 1.0; continue
         x[i, s] = 1.0; x[i, 6 + f] = 1.0
@@ -95,19 +98,21 @@ def resolve_chords(lp, chord):
 
 
 @torch.no_grad()
-def predict(net, notes, chord, device, fixed=None):
+def predict(net, notes, chord, device, fixed=None, instrument=INSTR):
     """
     Bir kayıt -> (tel (N,), perde (N,), parmak (N,)). Ses kullanılmaz ("edisyon önerisi" modu).
-    fixed: not başına tel | -1 (verilirse konum sabit; parmak ölçümü).
+    fixed: not başına tel | -1 (verilirse konum sabit; parmak ölçümü). instrument: kullanıcı akortu (kapo dahil, perdeler
+    kapodan; varsayılan standart = eski davranış birebir).
     """
     net.eval()
-    pidx, cont, valid = note_features(notes, chord)
+    pidx, cont, valid = note_features(notes, chord, instrument)
     t = lambda a, dt: torch.as_tensor(a, dtype=dt, device=device).unsqueeze(0)
     lp = net.strings(t(pidx, torch.long), t(cont, torch.float32), t(valid, torch.bool))[0].cpu().numpy()
     s = np.where(valid.any(1), resolve_chords(lp, chord), -1)    # hiçbir telde çalınamayan nota: -1
     if fixed is not None:
         s = np.where(np.asarray(fixed) >= 0, fixed, s)
-    fret = np.where(s >= 0, np.asarray(notes)[:, 2].astype(int) - np.array(INSTR.tuning)[s], -1)
-    fl = net.fingers(t(pidx, torch.long), t(cont, torch.float32), t(position_features(s, np.asarray(notes)), torch.float32),
+    fret = np.where(s >= 0, np.asarray(notes)[:, 2].astype(int) - np.array(instrument.tuning)[s], -1)
+    fl = net.fingers(t(pidx, torch.long), t(cont, torch.float32),
+                     t(position_features(s, np.asarray(notes), instrument), torch.float32),
                      t(fret == 0, torch.bool))[0]
     return s, fret, fl.argmax(-1).cpu().numpy()

@@ -29,6 +29,11 @@ konum tercihi yalnız BİLGİ olarak sayılır, uygulanmaz.
     python -m scripts.app.transcribe_ascii --audio "ornek.wav" --output tab.txt
     python -m scripts.app.transcribe_ascii --audio "ornek.wav" --meter 3/4 --taps data/taps/ornek.txt
     python -m scripts.app.transcribe_ascii --audio "ornek.wav" --meter 3/4 --bpm 70
+    python -m scripts.app.transcribe_ascii --audio "ornek.wav" --tuning DADGBE --capo 2
+
+`--tuning` / `--capo` (Katman 6 Adım 3): tel/perde kullanıcı akortunda (perdeler kapodan); akustik çözümleme standart akortta
+kalır (model çıkışı), tel ataması gtab.pipeline.heard_positions ile (scripts.app.transcribe ile aynı yol). Standart dışı
+akortta öğrenilen geçiş modeli yok -> --w-transition 0 olmalı. E2'nin altındaki notalar (drop-D'de D2, D#2) bulunamaz.
 """
 
 import argparse
@@ -39,7 +44,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from gtab.config import FRAME_RATE
-from gtab.core.instrument import STANDARD_6
+from gtab.core.instrument import STANDARD_6, parse_tuning, with_capo
 from gtab.core.note_event import NoteEvent, Transcription
 from gtab.models.stack import active
 from gtab.paths import ckpt_path
@@ -106,12 +111,13 @@ def build_events(segs: Sequence[Tuple[int, int, int]], assign: Sequence[Tuple],
 
 
 def transcribe_cqt(cqt: np.ndarray, ckpt: Path, thr: float, onset_thr: float, dec: Dict,
-                   w_transition: float, device) -> Transcription:
-    """CQT -> Transcription. Model, çözümleme ve tel ataması mevcut kodla yapılır."""
+                   w_transition: float, device, instrument=STANDARD_6) -> Transcription:
+    """CQT -> Transcription. Model, çözümleme ve tel ataması mevcut kodla yapılır (instrument = kullanıcı akortu + kapo)."""
     from gtab.data.torch_dataset import _normalize
-    from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice
+    from gtab.decoding.transitions import TransitionModel
     from gtab.decoding.viterbi import energy_rise, segment
     from gtab.models.inference import load_model, predict_heads
+    from gtab.pipeline import heard_positions
     model, _, _ = load_model("crnn", device, str(ckpt))
     probs, ons, offs, pons = predict_heads(model, _normalize(cqt), device, with_pitch_onset=True)
     segs = segment(probs, ons, thr, onset_thr, INSTR, rise=energy_rise(cqt, INSTR), offsets=offs,
@@ -119,11 +125,11 @@ def transcribe_cqt(cqt: np.ndarray, ckpt: Path, thr: float, onset_thr: float, de
     if not segs:
         return Transcription(notes=[])
     tm = TransitionModel.load(str(resolve_file(STACK["transitions"], "gecis modeli")), INSTR)
-    asg = decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
+    asg = heard_positions(segs, probs, tm, instrument, w_transition)
     return build_events(segs, asg)
 
 
-def add_fingering(tr: Transcription, ckpt: Path, device) -> Tuple[List[int], int]:
+def add_fingering(tr: Transcription, ckpt: Path, device, instrument=STANDARD_6) -> Tuple[List[int], int]:
     """
     Mevcut tel/perde KORUNARAK parmak ekler (`fixed` konum). -> (nota başına parmak, farklı
     konum sayısı). İkinci değer yalnız bilgi: parmak modeli serbest bırakılsa kaç notada başka
@@ -137,8 +143,8 @@ def add_fingering(tr: Transcription, ckpt: Path, device) -> Tuple[List[int], int
     notes = np.array([[n.onset, n.offset, n.pitch] for n in tr.notes], float)
     order, chord = order_notes(notes)
     fixed = np.array([tr.notes[i].string if tr.notes[i].string is not None else -1 for i in order])
-    _, _, fingers = ed_predict(net, notes[order], chord, device, fixed=fixed)
-    free_s, _, _ = ed_predict(net, notes[order], chord, device)
+    _, _, fingers = ed_predict(net, notes[order], chord, device, fixed=fixed, instrument=instrument)
+    free_s, _, _ = ed_predict(net, notes[order], chord, device, instrument=instrument)
     out = [0] * len(tr.notes)
     for k, i in enumerate(order):
         out[i] = int(fingers[k])
@@ -187,6 +193,9 @@ def main(args) -> int:
     ckpt = resolve_file(args.ckpt, "model checkpoint'i")
     cal = resolve_file(args.cal, "kalibrasyon dosyasi")
     thr, onset_thr, dec = load_calibration(cal, args.domain)
+    instr = with_capo(parse_tuning(args.tuning), args.capo)
+    if instr.tuning != INSTR.tuning and args.w_transition != 0:
+        raise TranscribeError("standart disi akort / kapo icin ogrenilen gecis modeli yok: --w-transition 0 kullan")
     try:
         cqt = cqt_from_file(str(audio))
     except Exception as e:                      # bozuk/desteklenmeyen ses: sahte cikti uretme
@@ -197,11 +206,14 @@ def main(args) -> int:
     print(f"Model     : {ckpt.name} | cihaz {device}")
     print(f"Kalibrasyon: {cal.name} [{args.domain}] = {DOMAINS[args.domain]}")
     print(f"             perde esigi {thr:.3f} | onset esigi {onset_thr} | kurallar {dec}")
-    tr = transcribe_cqt(cqt, ckpt, thr, onset_thr, dec, args.w_transition, device)
+    if instr.tuning != INSTR.tuning:
+        print(f"Akort     : {' '.join(note_name(p) for p in parse_tuning(args.tuning).tuning)}"
+              f"{f' | kapo {args.capo} (perdeler kapodan)' if args.capo else ''} | tel adlari standart (E = 6. tel)")
+    tr = transcribe_cqt(cqt, ckpt, thr, onset_thr, dec, args.w_transition, device, instr)
     fingers, differs = (None, 0)
     if args.fingering and tr.notes:
         fingers, differs = add_fingering(tr, resolve_file(args.fingering_ckpt, "parmak modeli"),
-                                         device)
+                                         device, instr)
     print(f"\nTespit edilen nota: {len(tr.notes)}")
     if not tr.notes:
         print("  (nota bulunamadi — esik/alan ayari bu kayit icin uygun olmayabilir)")
@@ -245,6 +257,8 @@ if __name__ == "__main__":
     ap.add_argument("--taps", default=None, help="tap modu: vurus dokunuslari dosyasi (sn; tap_recorder.html)")
     ap.add_argument("--bpm", type=float, default=None, help="yari otomatik: yaklasik tempo (--taps yoksa)")
     ap.add_argument("--shift", type=int, default=0, help="olcu cizgilerini k vurus ileri kaydir")
+    ap.add_argument("--tuning", default="EADGBE", help="akort, pesten tize (orn. DADGBE ya da 'D2 A2 D3 G3 B3 E4')")
+    ap.add_argument("--capo", type=int, default=0, help="kapo perdesi (TAB perdeleri kapodan sayilir)")
     a = ap.parse_args()
     if a.meter and a.bpm is None and a.taps is None:
         ap.error("--meter ile --taps ya da --bpm gerekli")

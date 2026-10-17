@@ -33,7 +33,7 @@ def _pitch(el, midi):
     _sub(p, "octave", midi // 12 - 1)
 
 
-def _attributes(m, sig, beat_q, tab, instrument):
+def _attributes(m, sig, beat_q, tab, instrument, capo=0):
     a = _sub(m, "attributes")
     _sub(a, "divisions", int(round(TICKS / beat_q)))
     _sub(_sub(a, "key"), "fifths", 0)
@@ -50,6 +50,8 @@ def _attributes(m, sig, beat_q, tab, instrument):
             if ALTER[p % 12]:
                 _sub(st, "tuning-alter", ALTER[p % 12])
             _sub(st, "tuning-octave", p // 12 - 1)
+        if capo:                                           # perdeler kapodan sayılır (MusicXML <capo>)
+            _sub(sd, "capo", capo)
     else:
         _sub(c, "sign", "G"); _sub(c, "line", 2); _sub(c, "clef-octave-change", -1)
 
@@ -84,10 +86,11 @@ def _note(m, piece, midi=None, chord=False, technical=()):
 
 
 def write_musicxml(path, measures, pitch, string, fret, sig, beat_q, bpm=None, finger=None, title="Transkripsiyon",
-                   instrument=STANDARD_6):
+                   instrument=STANDARD_6, capo=0):
     """
     measures: gtab.render.score.build_measures çıktısı; pitch / string (0 = en pes, -1 = konumsuz) / fret / finger (-1 =
     yok; None = parmak yazılmaz): nota başına diziler. sig = (pay, payda), beat_q = vuruş uzunluğu (çeyrek), bpm = vuruş/dk.
+    instrument = açık tel akortu (kaposuz; <staff-tuning>), capo = kapo perdesi (fret kapodan sayılır; 0 = yazılmaz).
     """
     S = len(instrument.tuning)
     root = ET.Element("score-partwise", version="4.0")
@@ -100,7 +103,7 @@ def write_musicxml(path, measures, pitch, string, fret, sig, beat_q, bpm=None, f
         for k, pieces in enumerate(measures):
             m = _sub(part, "measure", number=str(k + 1))
             if k == 0:
-                _attributes(m, sig, beat_q, tab, instrument)
+                _attributes(m, sig, beat_q, tab, instrument, capo)
                 if bpm and not tab:
                     unit, dot = BEAT_UNIT.get(float(beat_q), ("quarter", 0))
                     d = _sub(m, "direction", placement="above")

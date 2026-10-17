@@ -58,3 +58,50 @@ SEVEN_STRING = Instrument("seven_string",  (35, 40, 45, 50, 55, 59, 64), 24)    
 BASS_4       = Instrument("bass_4",        (28, 33, 38, 43), 24)                  # E1 A1 D2 G2
 
 PRESETS = {i.name: i for i in (STANDARD_6, DROP_D_6, SEVEN_STRING, BASS_4)}
+
+_NOTE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+
+def parse_tuning(text: str, num_frets: int = 24) -> Instrument:
+    """
+    Katman 6 Adım 3 — kullanıcı akortu (pesten tize): "DADGBE" (6 telli; oktav standart açık telin en yakınından)
+    ya da "D2 A2 D3 G3 B3 E4" (oktavlı; # / b işaretli). Bilinen bir preset'le aynıysa o preset döner (ör. DROP_D_6).
+    """
+    t = text.strip()
+    if t.islower():                                          # "dadgbe": küçük b burada nota, bemol değil
+        t = t.upper()
+    toks = t.split()
+    if " " not in t:                                         # "DADGBE": harf + isteğe bağlı # / b
+        toks, i = [], 0
+        while i < len(t):
+            j = i + 1 + (i + 1 < len(t) and t[i + 1] in "#b")
+            toks.append(t[i:j]); i = j
+    out = []
+    for k, tok in enumerate(toks):
+        name = tok[0].upper()
+        if name not in _NOTE:
+            raise ValueError(f"akort anlasilmadi: {text!r} ({tok!r})")
+        acc = tok[1:2] if tok[1:2] in ("#", "b") else ""
+        pc = _NOTE[name] + {"#": 1, "b": -1, "": 0}[acc]
+        octave = tok[1 + len(acc):]
+        if octave:
+            out.append(12 * (int(octave) + 1) + pc)
+        else:
+            if len(toks) != STANDARD_6.num_strings:
+                raise ValueError(f"oktavsiz akort yalniz 6 tel icin: {text!r}")
+            ref = STANDARD_6.tuning[k]                       # standart açık tele en yakın oktav (± 6 yarım ses)
+            out.append(ref + (pc - ref + 6) % 12 - 6)
+    tuning = tuple(out)
+    for p in PRESETS.values():
+        if p.tuning == tuning and p.num_frets == num_frets:
+            return p
+    return Instrument("tuning_" + "_".join(map(str, tuning)), tuning, num_frets)
+
+
+def with_capo(instr: Instrument, capo: int) -> Instrument:
+    """Kapo k: açık teller k yarım ses tiz, perdeler kapodan sayılır (TAB / MusicXML <capo> geleneği). k = 0 -> aynı nesne."""
+    if capo == 0:
+        return instr
+    if not 0 < capo < instr.num_frets:
+        raise ValueError(f"kapo 0..{instr.num_frets - 1} olmali: {capo}")
+    return Instrument(f"{instr.name}_capo{capo}", tuple(p + capo for p in instr.tuning), instr.num_frets - capo)
