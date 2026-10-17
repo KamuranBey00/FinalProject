@@ -101,7 +101,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `decoding/beat_dbn.py` | Bar-pointer DBN (tempo × ölçü içi konum × ölçü 1–4; tek karelik vuruş bölgesi) + tepe seçimi tabanı |
 | `decoding/taps.py` | Tap modu (Katman 5 Adım 3): dokunuş dosyası okuma, dokunuşlar → vuruşlar (gecikme, fazla / kaçan dokunuş) + ölçü fazı Viterbi'si |
 | `decoding/playability.py` | Çalınabilirlik metrikleri (zamanda örtüşen çiftlerde parmak çakışması, el açıklığı, ters parmak sırası, barre, pozisyon kayması) |
-| `data/degrade.py` | Kayıt koşulu bozulmaları (yankı, telefon, gürültü; Katman 6) |
+| `data/degrade.py` | Kayıt koşulu bozulmaları (yankı, telefon, gürültü, şarkı / konuşma karışımı; eğitim için rastgele zincir; Katman 6) |
 | `data/hex.py` | GuitarSet hex kaydı → tel başına spektrum (yardımcı eğitim hedefi) |
 | `data/contour.py` | Sürekli F0 konturu (Katman 4 hazırlığı): cent dönüşümü, nota–kontur hizalaması, kalite bayrakları |
 | `evaluation/metrics.py` | Ortak metrikler (P/R/F1, tab F1, onset F1) |
@@ -121,6 +121,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/build_guitarset.py`, `data/build_tab_labels.py`, `data/build_comp.py` | GuitarSet solo ve akorlu kayıt önbelleği |
 | `data/build_gaps.py` | GAPS önbelleği (`--disjoint` = icracı-ayrık) |
 | `data/build_gaps_tab.py` | GAPS partisyon TAB + parmak etiketleri → `data/cache/gaps_tab/`; `--recover-repeats` → `gaps_tab_rec/` (içerikten ölçü sırası, 236 kayıt) |
+| `data/get_voices.py`, `data/build_degraded.py` | Katman 6 Adım 2: şarkı + konuşma ses bankaları (VocalSet, LibriSpeech); bozulmuş CQT önbellekleri (`train_onset --degrade-root`) |
 | `data/build_hex.py`, `data/build_contour.py` | Hex tel spektrumu ve F0 konturu önbellekleri |
 | `data/build_rhythm.py` | Ritim etiketleri (GAPS + GuitarSet) → `data/cache/rhythm/` |
 | `data/build_beat_feats.py` | deep2 gövde temsili önbelleği → `data/cache/beat_feats/<ckpt>/` (vuruş ağı girdisi) |

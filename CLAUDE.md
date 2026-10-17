@@ -37,7 +37,7 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
 
 ## Veri
 - `data/` git'e girmez. Kaynaklar README'lerde; önbellek `scripts/data/*` ile üretilir.
-- Disk ~73 GB boş: SynthTab'den yalnızca sınırlı naylon (`luthier_*`) alt küme.
+- Disk: 17 Ekim'de C: ~87 GB boş; SynthTab'den yalnızca sınırlı naylon (`luthier_*`) alt küme.
 
 ## Güncel durum (10 Ekim 2026 itibarıyla)
 - **Kullanıcı hedefi: solo fingerstyle** (klasik gitar; tek ve çok ses; hızlı/yavaş art arda notaların
@@ -117,8 +117,13 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   Katman 6'da çıkan sorunlar Katman 6'da çözülür.
 - **Katman 6 sürüyor (16 Ekim, `docs/devlog/README18.md`; kullanıcı kararı: Katman 4 teknik verisi hazır olunca, önce 6):**
   gerçek dünya = kayıt koşulu (yankı / telefon / gürültü; `gtab/data/degrade.py`), polifoni, akort, kendi kayıtlarımız
-  (`docs/KAYIT_PROTOKOLU.md`, E01–E15; teknik egzersizleri de içinde). Adım 0 `eval_robust` kodlandı (duman testi: yankı 0.5 sn
-  −0.06, telefon −0.03) → **kullanıcı ölçümü bekleniyor**; karar kuralı README18.
+  (`docs/KAYIT_PROTOKOLU.md`, E01–E15; teknik egzersizleri de içinde). Adım 0 ölçüldü (gaps_val: yankı 0.5 sn −0.038, telefon −0.043,
+  gürültü 20 dB −0.031 → Adım 2; polifoni tetiklenmedi). **Adım 2 kodlandı:** `get_voices` (VocalSet + LibriSpeech, şarkıcı-ayrık
+  bankalar), `build_degraded` (`data/cache/degraded`), `train_onset --degrade-root` (seçimde bozuk GAPS onset) → `tabcrnn_robust.pt`
+  → **3 deneme kabul edilmedi** (son: sessiz artırma `checkpoints/archive/tabcrnn_robust3.pt`, GS tab −0.021) → eğitim yolu kapandı,
+  taban deep2. **İnsan sesi: `eval_robust --separate mix-vocals` (Demucs, karışım − vokal) KABUL** (temiz +0.001, şarkı 10 dB +0.084,
+  konuşma +0.076; ürüne alma ayrı karar). **Adım 3 akort / kapo KABUL** (`parse_tuning`, `gtab/decoding/retune.py`; akustik çözümleme hep
+  STANDARD_6; gaps_fit konum +0.08; D2 / D#2 model aralığı dışı). 17 Ekim: **kendi kayıtlarımız bekleniyor** (0c). Plan: `.omc/plans/`.
 - **Temizlik (10 Ekim):** eski / reddedilen kod `archive/` (bkz. `archive/README.md`), eski checkpoint'ler
   `checkpoints/archive/`. Aktif: data betikleri, `train_onset`, `train_edition_seq`, `eval_pitch`, `diagnose_pitch`,
   `eval_hmm`, `eval_edition`; checkpoint `tabcrnn_deep2.pt` (+cal), `edition_seq.pt`, `transitions.npz`.

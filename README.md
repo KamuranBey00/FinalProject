@@ -274,7 +274,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
       bu hâliyle; Adım 2 ölçülü TAB (MusicXML) kodlandı ([README16](docs/devlog/README16.md)); Adım 3 tap modu (ileri
       seçenek) + tap tempo, Armağan birleşimi, model yığını ([README17](docs/devlog/README17.md))
 - [ ] Katman 6 — Zorlaştırma: polifoni (akorlar), kayıt koşulu dayanıklılığı (distortion yerine: oda, telefon, gürültü),
-      farklı gitar/akort desteği, kendi test setimiz — **sürüyor** ([README18](docs/devlog/README18.md)): Adım 0 ölçümü
+      farklı gitar/akort desteği, kendi test setimiz — **sürüyor** ([README18](docs/devlog/README18.md)): Adım 0 ölçümü;
+      dayanıklılık eğitimi kabul edilmedi; insan sesi kaynak ayırmayla (`--separate mix-vocals`) ve akort / kapo kabul; kendi kayıtlarımız bekleniyor
 
 **Açık notlar (kapanmadı):** A teli tel doğruluğu (solo, oracle notalar) `tabcrnn_gaps.pt` 0.600 → deep2 **0.641** — ileride
 dönülecek (README17 Ek B); tremolo Katman 4'te; `edition_seq_rec.pt` ürüne alınacak (acelesi yok).
