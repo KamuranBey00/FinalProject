@@ -75,12 +75,14 @@ Her egzersiz **2 kez** çalınır. Süreler 60 BPM'e göre yaklaşıktır.
 | **E14** | **6. teli D'ye indir (drop D)**, sonra E01'in yalnız 6. ve 5. tel kısmı + E04 (D akoruyla) | 60 | 1.5 dk |
 | **E15** | **Serbest parça:** çalabildiğin 1–2 kısa klasik parça (1–2 dk). Parçanın adını ve bestecisini meta.csv'ye yaz; partisyonu GAPS'te varsa etiketi oradan çıkarırız. Metronomsuz, doğal tempoda | serbest | 2–4 dk |
 
+| **E16** | **Çalarken ses:** E04 arpejini ya da E15 parçasını çalarken (a) şarkı söyle / mırıldan, (b) biri yanında konuşsun, (c) TV / müzik arka planda kısık sesle. Her biri 1 kez | 60 / serbest | 3 dk |
+
 **Toplam:** 2 tekrarla kişi ve cihaz başına yaklaşık 35–40 dakika. Tek oturumda bitmesi gerekmiyor.
 
 ---
 
 ## 3. Öncelik (vakit azsa)
-1. **E01, E02, E04, E05, E15**: Katman 6'nın ihtiyacı (tel, polifoni, gerçek müzik).
+1. **E01, E02, E04, E05, E15, E16**: Katman 6'nın ihtiyacı (tel, polifoni, gerçek müzik, çalarken insan sesi).
 2. **E07, E08, E14**: tremolo ve akort.
 3. **E09–E13**: teknikler (Katman 4'e kadar bekleyebilir).
 

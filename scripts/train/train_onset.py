@@ -163,7 +163,8 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           harmonics=None, onset_soft=None, gs_pitch_weight=0.0, short_frames=0, short_weight=1.0,
           repeat_weight=1.0, repeat_gap=3, offset_weight=0.0, valley_weight=1.0, frag_weight=1.0, oversample=1.0, deep=0,
           pitch_onset_weight=0.0, new_lr_mult=1.0, gaps_tab_weight=0.0, overwrite=False,
-          string_weights=None, save_epochs=False, prior_debias=0.0, prior_cap=3.0, hex_weight=0.0):
+          string_weights=None, save_epochs=False, prior_debias=0.0, prior_cap=3.0, hex_weight=0.0,
+          degrade_root=None, degrade_p=0.5):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
@@ -193,7 +194,11 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
                           short_frames=short_frames, short_weight=short_weight,
                           repeat_weight=repeat_weight, repeat_gap=repeat_gap,
                           valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gs_frag,
-                          hex_dir=str(Path(CACHE_DIR) / "hex") if hex_weight > 0 else None)
+                          hex_dir=str(Path(CACHE_DIR) / "hex") if hex_weight > 0 else None,
+                          alt_root=degrade_root, alt_p=degrade_p)
+    if degrade_root:                                   # Katman 6 Adım 2: bozulmuş CQT kopyaları (build_degraded)
+        print(f"Katman 6 Adim 2: bozulmus kopya olasiligi {degrade_p} ({degrade_root}) | GuitarSet kopyali parca "
+              f"{sum(bool(a) for a in tab_ds.alts)}/{len(tab_ds)}")
     if hex_weight > 0:
         print(f"README17 Ek A: hex tel spektrumu yardimci kaybi x{hex_weight} | hex'li parca "
               f"{sum(tab_ds.has_hex)}/{len(tab_ds)} (build_hex calisti mi?)")
@@ -202,7 +207,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     tab_dl = make_loader(tab_ds, batch_size, oversample)
     gs_val = DataLoader(GuitarSetSeq(CACHE_DIR, "val", CHUNK, onsets=True, onset_soft=onset_soft),
                         batch_size=batch_size)
-    p_tr = gp_val = None
+    p_tr = gp_val = gp_val_deg = None
     if pitch_splits:
         tr_f, va_f = [], []
         for sp in pitch_splits:
@@ -211,10 +216,13 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         p_tr = make_loader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft,
                                     repeat_weight=repeat_weight, repeat_gap=repeat_gap,
                                     valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gaps_frag,
-                                    tab_dir=td),
+                                    tab_dir=td, alt_root=degrade_root, alt_p=degrade_p),
                            batch_size, oversample)
         gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft, tab_dir=td),
                             batch_size=batch_size)
+        if degrade_root:                               # Katman 6 Adım 2: aynı doğrulama kayıtlarının bozulmuş kopyası 0
+            gp_val_deg = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft,
+                                             alt_root=degrade_root, alt_fixed=0), batch_size=batch_size)
         print(f"perde: {len(tr_f)} train / {len(va_f)} val kaydi (icraciya gore ayrik)"
               + (f" | partisyon TAB kaybi x{gaps_tab_weight} ({td})" if td else ""))
 
@@ -283,18 +291,24 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
 
     def score(ep, logs):
         m, bt = evaluate(model, gs_val, gp_val, idx, device)
+        if gp_val_deg is not None:                     # Katman 6 Adım 2: bozulmuş GAPS doğrulaması (seçime girer)
+            md, _ = evaluate(model, [], gp_val_deg, idx, device)
+            m["god"] = max(md["go"], md.get("gpo", 0.0))
         state["cur_thr"] = bt.get("go", bt.get("on"))
         print(f"ep {ep:2d} | " + " ".join(f"{k} {v:.3f}" for k, v in logs.items()) + " | " +
               " ".join(f"{n} {m[k]:.3f}" + (f"@{bt[k]}" if k in bt else "")
                        for k, n in (("tab", "GS-tabF1"), ("on", "GS-onsetF1"), ("pon", "GS-perdeOnsetF1(kafa)"),
                                     ("gf", "GAPS-kareF1"), ("go", "GAPS-onsetF1(tel)"),
-                                    ("gpo", "GAPS-onsetF1(kafa)"), ("gtab", "GAPS-tabF1(partisyon)")) if k in m))
+                                    ("gpo", "GAPS-onsetF1(kafa)"), ("gtab", "GAPS-tabF1(partisyon)"),
+                                    ("god", "GAPS-onsetF1(bozuk)")) if k in m))
         # seçim skoru: eski 4 ölçü; GAPS onset'te iki yoldan iyisi (kafa yoksa eskisiyle birebir)
         sel = {k: m[k] for k in ("tab", "on", "gf", "go") if k in m}
         if "gpo" in m:
             sel["go"] = max(m["go"], m["gpo"])
         if "gtab" in m:                                # Katman 3.13: GAPS tel ölçüsü de seçime girer
             sel["gtab"] = m["gtab"]
+        if "god" in m:                                 # Katman 6 Adım 2: bozulmuş GAPS onset'i de seçime girer
+            sel["god"] = m["god"]
         return sum(sel.values()) / len(sel)
 
     best = score(0, {}); state["thr"] = state["cur_thr"]; save()
@@ -432,6 +446,10 @@ if __name__ == "__main__":
     ap.add_argument("--new-lr-mult", type=float, default=1.0, help="init'te olmayan yeni katmanlarin lr carpani")
     ap.add_argument("--gaps-tab-weight", type=float, default=0.0,
                     help="Katman 3.13: GAPS partisyon TAB'i tel kaybi agirligi (0 = kapali; build_gaps_tab gerekir)")
+    # Katman 6 Adim 2 (varsayilan = onceki egitim, birebir)
+    ap.add_argument("--degrade-root", default=None,
+                    help="bozulmus CQT kopyalari (build_degraded: data/cache/degraded); bos = kapali")
+    ap.add_argument("--degrade-p", type=float, default=0.5, help="parcanin bozulmus kopyayla verilme olasiligi")
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
@@ -446,4 +464,4 @@ if __name__ == "__main__":
           gaps_tab_weight=a.gaps_tab_weight, overwrite=a.overwrite,
           string_weights=tuple(float(v) for v in a.string_weights.split(",")) if a.string_weights else None,
           save_epochs=a.save_epochs, prior_debias=a.prior_debias, prior_cap=a.prior_cap,
-          hex_weight=a.hex_weight)
+          hex_weight=a.hex_weight, degrade_root=a.degrade_root, degrade_p=a.degrade_p)

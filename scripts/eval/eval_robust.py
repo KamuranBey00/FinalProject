@@ -10,13 +10,17 @@ Rapor (koşul başına): nota P / R / F1 (50 ms), @100 ms, kare F1, polifoni dü
     python -m scripts.eval.eval_robust                       # gaps_val, 6 koşul (~15 dk)
     python -m scripts.eval.eval_robust --limit 2             # duman testi
     python -m scripts.eval.eval_robust --conditions temiz telefon
+    python -m scripts.eval.eval_robust --ckpt tabcrnn_robust.pt --cal tabcrnn_deep2.cal.json   # Adım 2 aday
+    python -m scripts.eval.eval_robust --separate mix-vocals --conditions temiz sarki_10dB   # Adım 2b: bozulma -> demucs -> CQT
+    python -m scripts.eval.eval_robust --separate guitar --conditions temiz sarki_10dB      # (pip install demucs gerekir)
 """
 
 import argparse
 import os
+import time
 
 from gtab.core.instrument import STANDARD_6
-from gtab.data.degrade import CONDITIONS, degrade
+from gtab.data.degrade import CONDITIONS, VOICE_CONDITIONS, VOICE_DIR, degrade
 from gtab.data.features import compute_cqt, load_audio
 from gtab.data.gaps import GAPS_DIR, gaps_files
 from gtab.data.torch_dataset import _normalize
@@ -33,12 +37,18 @@ INSTR = STANDARD_6
 POLY = ("1", "2", "3", "4+")
 
 
-def main(conditions, limit):
-    s, device = active(), get_device()
+def main(conditions, limit, ckpt=None, cal=None, sep=None):
+    if not os.path.exists(os.path.join(VOICE_DIR, "sing_eval.npy")):
+        skip = [c for c in conditions if c in VOICE_CONDITIONS]
+        if skip:
+            print(f"ses bankasi yok -> {skip} atlandi (once: python -m scripts.data.get_voices)")
+        conditions = [c for c in conditions if c not in VOICE_CONDITIONS]
+    s, device = dict(active(), **{k: v for k, v in (("acoustic", ckpt), ("cal", cal)) if v}), get_device()
     model, _, _ = load_model("crnn", device, s["acoustic"])
     _, thr, ot, dec = load_selection(ckpt_path(s["cal"]))["gaps_val"]
     files = gaps_files("gaps_train")[1][:limit]
-    print(f"taban {s['acoustic']} | kalibrasyon {s['cal']} [gaps_val] | {len(files)} kayit | kosullar {conditions}")
+    print(f"taban {s['acoustic']} | kalibrasyon {s['cal']} [gaps_val] | {len(files)} kayit | kosullar {conditions}"
+          + (f" | ayirma {sep}" if sep else ""))
     res = {c: [] for c in conditions}
     for k, f in enumerate(files):
         tid = os.path.splitext(os.path.basename(f))[0]
@@ -47,7 +57,13 @@ def main(conditions, limit):
             frame, onset = d["frame"], d["onset"]
         for c in conditions:
             kind, params = CONDITIONS[c]
-            cqt = compute_cqt(degrade(y, kind, params, seed=k))[:len(frame)]
+            yd = degrade(y, kind, params, seed=k)
+            if sep:
+                from gtab.data.separate import separate
+                t0 = time.time()
+                yd = separate(yd, mode=sep)
+                print(f"    {c}: ayirma {time.time() - t0:.1f} sn", flush=True)
+            cqt = compute_cqt(yd)[:len(frame)]
             probs, ons, offs, pons = predict_heads(model, _normalize(cqt), device, with_pitch_onset=True)
             res[c].append(track_scores(probs, ons, frame, onset, thr, ot, dec, energy_rise(cqt, INSTR), offs, pons))
         print(f"  [{k + 1}/{len(files)}] {tid}", flush=True)
@@ -69,5 +85,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--conditions", nargs="+", default=list(CONDITIONS), choices=list(CONDITIONS))
     ap.add_argument("--limit", type=int, default=None, help="ilk N gaps_val kaydi (duman testi)")
+    ap.add_argument("--ckpt", default=None, help="ses modeli (varsayilan: aktif yigin)")
+    ap.add_argument("--cal", default=None, help="kalibrasyon (varsayilan: aktif yigin; yeni model icin tabanin karti da olur)")
+    ap.add_argument("--separate", choices=["guitar", "mix-vocals"], default=None,
+                    help="bozulmadan sonra demucs kaynak ayirma (Adim 2b; varsayilan: yok)")
     a = ap.parse_args()
-    main(a.conditions, a.limit)
+    main(a.conditions, a.limit, a.ckpt, a.cal, a.separate)

@@ -12,3 +12,5 @@ mirdata==1.0.0
 pretty_midi==0.2.11.post0
 mir_eval==0.8.2
 huggingface_hub==0.36.2
+# isteğe bağlı: Katman 6 Adım 2b (kaynak ayırma ölçümü). torch/numpy'a dokunmaz (dry-run doğrulandı).
+# demucs==4.1.0

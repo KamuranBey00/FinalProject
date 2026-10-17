@@ -19,6 +19,37 @@ def _normalize(cqt: np.ndarray) -> np.ndarray:
     return np.clip((cqt + 80.0) / 80.0, 0.0, 1.0).astype(np.float32)
 
 
+def _alt_cqts(alt_root, path):
+    """Katman 6 Adım 2: path'in bozulmuş kopyaları (build_degraded: <alt_root>/<k>/<split>/<id>.npz) -> normalize float16."""
+    out = []
+    if alt_root is None:
+        return out
+    for k in sorted(os.listdir(alt_root)):
+        p = os.path.join(alt_root, k, os.path.basename(os.path.dirname(path)), os.path.basename(path))
+        if os.path.exists(p):
+            with np.load(p) as d:
+                out.append(_normalize(d["cqt"]).astype(np.float16))
+    return out
+
+
+def _chunk(a, start, chunk, dtype):
+    c = np.zeros((chunk, a.shape[1]), dtype)
+    part = a[start:start + chunk]
+    c[:len(part)] = part
+    return c
+
+
+def _pick_alt(c, alts, p, fixed):
+    """Temiz parça c ya da bozulmuş kopyalardan biri: fixed = hep o kopya (doğrulama), yoksa p olasılıkla rastgele."""
+    if not alts:
+        return c
+    if fixed is not None:
+        return alts[fixed].astype(np.float32) if fixed < len(alts) else c
+    if p > 0 and torch.rand(1).item() < p:
+        return alts[int(torch.randint(len(alts), (1,)).item())].astype(np.float32)
+    return c
+
+
 def _window(cqt, t, context):
     half = context // 2
     T, n_bins = cqt.shape
@@ -125,8 +156,10 @@ class GuitarSetSeq(Dataset):
     def __init__(self, cache_dir, split, chunk=200, augment=False, num_frets=24,
                  bins_per_semitone=2, onsets=False, onset_soft=None, short_frames=0, short_weight=1.0,
                  repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None,
-                 hex_dir=None):
+                 hex_dir=None, alt_root=None, alt_p=0.0, alt_fixed=None):
         """
+        Katman 6 Adım 2: alt_root (build_degraded) -> parça başına bozulmuş CQT kopyaları; __getitem__ alt_p olasılıkla
+        temiz yerine birini verir (alt_fixed = hep o kopya, doğrulama). None = eski davranış, birebir.
         README17 Ek A: hex_dir -> per-string hex spectra (data/cache/hex/<id>.npz) as an extra target; items
         then end with (hex (L,6,B), has_hex). None = old behaviour, identical.
         Katman 3.11 Adım 4: valley_weight (hızlı tekrar vadisi "vuruş yok", hedef 0), frag_weight +
@@ -149,6 +182,7 @@ class GuitarSetSeq(Dataset):
         self.items = []
         self.hex_dir = hex_dir
         self.hex, self.has_hex = [], []
+        self.alts, self.alt_p, self.alt_fixed = [], alt_p, alt_fixed
         splits = [split] if isinstance(split, str) else list(split)
         paths = []
         for sp in splits:
@@ -181,6 +215,7 @@ class GuitarSetSeq(Dataset):
                     fm = frag_fn(path, cqt, tab, hard)
                     ow_all = np.where(fm, np.maximum(ow_all, frag_weight), ow_all)
             T, n_bins = cqt.shape
+            alt_all = _alt_cqts(alt_root, path)
             hx_all = None
             if hex_dir is not None:
                 hp = os.path.join(hex_dir, os.path.basename(path))
@@ -195,6 +230,7 @@ class GuitarSetSeq(Dataset):
                     pt = np.full((chunk, tab.shape[1]), self.PAD, np.int64); pt[:L] = tb
                     c, tb = pc, pt
                 self.items.append((c, tb, L))
+                self.alts.append([_chunk(a, start, chunk, np.float16) for a in alt_all])
                 if hex_dir is not None:
                     hx = np.zeros((chunk, 6, n_bins // 2), np.float16)
                     if hx_all is not None:
@@ -216,6 +252,7 @@ class GuitarSetSeq(Dataset):
 
     def __getitem__(self, i):
         c, tb, L = self.items[i]
+        c = _pick_alt(c, self.alts[i], self.alt_p, self.alt_fixed)
         if self.augment:
             c, tb = self._augment(c, tb)
         if self.with_onsets:
@@ -287,13 +324,15 @@ class PitchSeq(Dataset):
     """
 
     def __init__(self, files, chunk=200, onsets=False, dilate=2, onset_soft=None,
-                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None, tab_dir=None):
+                 repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None, tab_dir=None,
+                 alt_root=None, alt_p=0.0, alt_fixed=None):
         """onsets: True ise perde onset roll'u ve onset kaybı ağırlığı da verilir ->
         (x, frame, onset (L,P), onset ağırlığı (L,P), L). repeat_weight: Adım 3c tekrar ağırlığı.
         valley_weight / frag_weight / frag_fn(path, cqt, frame, onset) / self.fast: Katman 3.11 Adım 4
         (GuitarSetSeq ile aynı).
         tab_dir (Katman 3.13): partisyon TAB etiketleri (build_gaps_tab) -> çıktıya (L, S) tel sınıfı eklenir;
-        bilinmeyen kareler ve etiketi olmayan kayıtlar PAD (kayıpta yok sayılır)."""
+        bilinmeyen kareler ve etiketi olmayan kayıtlar PAD (kayıpta yok sayılır).
+        alt_root / alt_p / alt_fixed (Katman 6 Adım 2): bozulmuş CQT kopyaları, GuitarSetSeq ile aynı."""
         from gtab.data.tab_labels import repeat_onset_weights, valley_frames
         self.tab_dir = tab_dir
         self.tabs = []
@@ -302,6 +341,7 @@ class PitchSeq(Dataset):
         self.onsets = []
         self.on_weights = []
         self.fast = []
+        self.alts, self.alt_p, self.alt_fixed = [], alt_p, alt_fixed
         for path in files:
             with np.load(path) as d:
                 cqt = _normalize(d["cqt"]).astype(np.float16)
@@ -329,6 +369,7 @@ class PitchSeq(Dataset):
             if onsets and valley_weight != 1.0:       # Adım 4: vadi = "vuruş yok"
                 on_all = on_all * ~valley
             T, nb = cqt.shape
+            alt_all = _alt_cqts(alt_root, path)
             if tab_dir is not None:
                 tab_all = np.full((T, 6), GuitarSetSeq.PAD, np.int64)
                 lf = os.path.join(tab_dir, os.path.basename(path))
@@ -343,6 +384,7 @@ class PitchSeq(Dataset):
                     c = np.vstack([c, np.zeros((chunk - L, nb), np.float16)])
                     f = np.vstack([f, np.zeros((chunk - L, f.shape[1]), np.uint8)])
                 self.items.append((c, f, L))
+                self.alts.append([_chunk(a, s, chunk, np.float16) for a in alt_all])
                 if tab_dir is not None:
                     tb = np.full((chunk, 6), GuitarSetSeq.PAD, np.int64); tb[:L] = tab_all[s:s + chunk]
                     self.tabs.append(tb)
@@ -360,6 +402,7 @@ class PitchSeq(Dataset):
 
     def __getitem__(self, i):
         c, f, L = self.items[i]
+        c = _pick_alt(c, self.alts[i], self.alt_p, self.alt_fixed)
         x, fr = torch.from_numpy(c.astype(np.float32)).unsqueeze(0), torch.from_numpy(f.astype(np.float32))
         if self.with_onsets:
             out = (x, fr, torch.from_numpy(self.onsets[i].astype(np.float32)),
