@@ -26,17 +26,22 @@ import numpy as np
 
 from gtab.core.instrument import parse_tuning, with_capo
 from gtab.data.features import cqt_from_file
+from gtab.data.separate import cqt_from_file_separated
 from gtab.decoding.taps import load_taps
 from gtab.pipeline import load_models, transcribe
 from gtab.render.musicxml import write_musicxml
 from gtab.utils import get_device
 
 
-def main(src, bpm, meter, mode, out, shift, taps_file, tuning="EADGBE", capo=0):
+def main(src, bpm, meter, mode, out, shift, taps_file, tuning="EADGBE", capo=0, separate="none"):
     sig = tuple(int(x) for x in meter.split("/"))
     if src.endswith(".npz"):
+        if separate != "none":
+            raise SystemExit("--separate icin ses dosyasi gerekli (.npz onbellekte ham ses yok)")
         with np.load(src) as d:
             cqt = d["cqt"]
+    elif separate != "none":
+        cqt = cqt_from_file_separated(src, separate)
     else:
         cqt = cqt_from_file(src)
     taps = load_taps(taps_file) if taps_file else None
@@ -64,7 +69,9 @@ if __name__ == "__main__":
     ap.add_argument("--taps", default=None, help="tap modu: vurus dokunuslari dosyasi (sn)")
     ap.add_argument("--tuning", default="EADGBE", help="akort, pesten tize (orn. DADGBE ya da 'D2 A2 D3 G3 B3 E4')")
     ap.add_argument("--capo", type=int, default=0, help="kapo perdesi (TAB perdeleri kapodan sayilir)")
+    ap.add_argument("--separate", default="none", choices=["none", "mix-vocals"],
+                    help="sarkili kayit: mix-vocals = vokali cikar (Demucs; GPU'da hizli, CPU'da yavas)")
     a = ap.parse_args()
     if a.bpm is None and a.taps is None:
         ap.error("--bpm ya da --taps gerekli")
-    main(a.src, a.bpm, a.meter, a.mode, a.out, a.shift, a.taps, a.tuning, a.capo)
+    main(a.src, a.bpm, a.meter, a.mode, a.out, a.shift, a.taps, a.tuning, a.capo, a.separate)

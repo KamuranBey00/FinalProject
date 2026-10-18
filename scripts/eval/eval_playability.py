@@ -167,7 +167,7 @@ def verify_spans(rows: List[dict], limit: int) -> None:
               f"{r['en_genis']}")
 
 
-def main(split: str, worst: int, verify: int) -> None:
+def main(split: str, worst: int, verify: int, seq: str = "edition_seq.pt") -> None:
     try:
         assert_may_select(split)
     except ProtocolError as e:
@@ -177,7 +177,7 @@ def main(split: str, worst: int, verify: int) -> None:
     from gtab.models.edition_net import EditionNet
     device = get_device()
     net = EditionNet().to(device)
-    net.load_state_dict(torch.load(ckpt_path("edition_seq.pt"), map_location=device)["model"])
+    net.load_state_dict(torch.load(ckpt_path(seq), map_location=device)["model"])
 
     fit, val = gaps_training_files()
     files = [Path(f) for f in (val if split == "gaps_val" else fit)]
@@ -240,6 +240,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="gaps_val", help="gaps_val | gaps_fit (gaps_test reddedilir)")
     ap.add_argument("--worst", type=int, default=10)
+    ap.add_argument("--seq", default="edition_seq.pt", help="edisyon modeli (checkpoints/)")
     ap.add_argument("--verify-span", type=int, default=12, help="bu aciklik ve ustu dogrulanir")
     a = ap.parse_args()
-    main(a.split, a.worst, a.verify_span)
+    main(a.split, a.worst, a.verify_span, a.seq)

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAB Görüntüleyici</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --accent: #2f6fb3; --panel: #ffffff; --border: #d8d8d2; --cursor: rgba(47,111,179,.18); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --fg: #ececea; --muted: #9a9a94; --accent: #6ea8e6; --panel: #242423; --border: #3a3a37; --cursor: rgba(110,168,230,.25); }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  p.help { color: var(--muted); margin: 4px 0 14px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 12px;
+         background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
+  .bar label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .92rem; }
+  button, select { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+                   background: transparent; color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=range] { width: 130px; }
+  #info { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 8px 12px; margin-bottom: 10px; color: var(--muted); font-size: .95rem; }
+  #info b { color: var(--fg); font-weight: 600; }
+  #status { color: var(--muted); font-size: .9rem; min-height: 1.3em; }
+  #viewport { position: relative; height: 68vh; min-height: 360px; overflow-y: auto; background: #fff; color: #000;
+              border: 1px solid var(--border); border-radius: 10px; }
+  #score { padding: 8px; }
+  #empty { padding: 40px 16px; text-align: center; color: #6b6b66; }
+  .at-cursor-bar { background: var(--cursor); }
+  .at-cursor-beat { background: rgba(47,111,179,.75); width: 3px; }
+  .at-selection div { background: rgba(47,111,179,.1); }
+  .at-highlight * { fill: #2f6fb3; stroke: #2f6fb3; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alphaTab.min.js"></script>
+</head>
+<body>
+<main>
+  <h1>TAB görüntüleyici</h1>
+  <p class="help"><b>TAB nasıl okunur:</b> 6 çizgi = 6 tel (en alttaki çizgi en kalın tel), çizgi üzerindeki sayı = basılacak perde
+     (0 = boş tel). Sol el parmak numaraları (1 işaret, 2 orta, 3 yüzük, 4 serçe) yalnız "edisyon" modu çıktısında nota satırının üstünde görünür.
+     <code>transcribe</code> ile üretilen <code>.musicxml</code> dosyasını seç. İnternet gerekir (alphaTab ve ses bankası CDN'den yüklenir).</p>
+
+  <div class="bar">
+    <input type="file" id="file" accept=".musicxml,.xml,.mxl">
+    <label>Görünüm
+      <select id="mode">
+        <option value="scoretab">Nota + TAB</option>
+        <option value="tab">Yalnız TAB</option>
+        <option value="score">Yalnız nota</option>
+      </select>
+    </label>
+    <label>Yakınlaştırma <input type="range" id="zoom" min="50" max="200" value="100" step="10"><span id="zoomv">100%</span></label>
+  </div>
+  <div class="bar">
+    <button class="primary" id="play" disabled>Çal</button>
+    <button id="stop" disabled>Durdur</button>
+    <label>Hız <input type="range" id="speed" min="25" max="200" value="100" step="5"><span id="speedv">100%</span></label>
+    <span id="tempoNote" style="color:var(--muted);font-size:.9rem"></span>
+    <span id="status">Ses bankası yükleniyor...</span>
+  </div>
+
+  <div id="info"><span>Dosya seçilmedi.</span></div>
+
+  <div id="viewport"><div id="empty">Bir <code>.musicxml</code> dosyası seç.</div><div id="score"></div></div>
+</main>
+
+<script>
+(() => {
+  const V = "1.8.4";
+  const CDN = `https://cdn.jsdelivr.net/npm/@coderline/alphatab@${V}/dist/`;
+  const $ = id => document.getElementById(id);
+  const status = $("status");
+
+  if (typeof alphaTab === "undefined") {
+    status.textContent = "alphaTab yüklenemedi (internet / CDN erişimi yok).";
+    return;
+  }
+
+  const api = new alphaTab.AlphaTabApi($("score"), {
+    core: { fontDirectory: CDN + "font/", scriptFile: CDN + "alphaTab.min.js" },
+    display: { staveProfile: alphaTab.StaveProfile.ScoreTab, scale: 1.0 },
+    player: {
+      enablePlayer: true,
+      soundFont: CDN + "soundfont/sonivox.sf2",
+      scrollElement: $("viewport"),
+    },
+  });
+
+  let score = null, tracksByKind = {}, playerReady = false;
+
+  const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const noteName = m => NAMES[m % 12] + (Math.floor(m / 12) - 1);   // 40 -> E2
+
+  // yüklü partisyondan sayılar (transcribe çıktısındaki sayılarla kıyaslanır): tie hedefi yeni nota değil
+  function countNotes(staff) {
+    let n = 0;
+    for (const bar of staff.bars) for (const v of bar.voices) for (const beat of v.beats)
+      for (const note of beat.notes) if (!note.isTieDestination) n++;
+    return n;
+  }
+
+  function showInfo(s) {
+    const tabTrack = s.tracks.find(t => t.staves.some(st => st.showTablature));
+    const scoreTrack = s.tracks.find(t => t.staves.some(st => st.showStandardNotation && !st.showTablature)) || s.tracks[0];
+    tracksByKind = { tab: tabTrack, score: scoreTrack };
+    const ref = tabTrack || scoreTrack;
+    const st = ref.staves.find(x => x.showTablature) || ref.staves[0];
+    const tun = (st.stringTuning && st.stringTuning.tunings.length)
+      ? st.stringTuning.tunings.slice().reverse().map(noteName).join(" ") : "–";   // alçaktan tize
+    const capo = st.capo ? `${st.capo}. perde` : "yok";
+    const meters = new Set(s.masterBars.map(m => m.timeSignatureNumerator + "/" + m.timeSignatureDenominator));
+    $("info").innerHTML =
+      `<span>Başlık: <b></b></span>` +
+      `<span>Akort (kalından inceye): <b>${tun}</b></span>` +
+      `<span>Kapo: <b>${capo}</b></span>` +
+      `<span>Ölçü sayısı: <b>${s.masterBars.length}</b></span>` +
+      `<span>Nota sayısı: <b>${countNotes(st)}</b></span>` +
+      `<span>Ölçü: <b>${[...meters].join(", ")}</b></span>` +
+      `<span>Tempo: <b>${Math.round(s.tempo)} BPM</b></span>`;
+    $("info").querySelector("b").textContent = s.title || "(adsız)";
+    $("tempoNote").textContent = "";
+  }
+
+  function applyMode() {
+    if (!score) return;
+    const m = $("mode").value;
+    const { tab, score: sc } = tracksByKind;
+    api.settings.display.staveProfile = { tab: alphaTab.StaveProfile.Tab, score: alphaTab.StaveProfile.Score,
+                                          scoretab: alphaTab.StaveProfile.ScoreTab }[m];
+    api.updateSettings();
+    let tracks;
+    if (!tab || tab === sc) tracks = [sc];                       // tek izli dosya: profil yeter
+    else tracks = m === "tab" ? [tab] : m === "score" ? [sc] : [sc, tab];
+    api.renderTracks(tracks);
+    muteTab();
+  }
+
+  // iki iz de çalınırsa çift ses olur: yalnız nota izi duyulur (kapo / akort mutlak perdede)
+  function muteTab() {
+    const { tab, score: sc } = tracksByKind;
+    if (!playerReady || !tab || tab === sc) return;
+    api.changeTrackMute([tab], true);
+    api.changeTrackMute([sc], false);
+  }
+
+  api.scoreLoaded.on(s => {
+    score = s; showInfo(s);
+    $("empty").style.display = "none";
+    $("tempoNote").textContent = "";
+  });
+  api.renderStarted.on(() => { status.textContent = "Çiziliyor..."; });
+  api.renderFinished.on(() => { status.textContent = playerReady ? "Hazır." : "Ses bankası yükleniyor..."; });
+  if (api.soundFontLoad) api.soundFontLoad.on(e => { status.textContent = `Ses bankası yükleniyor... %${Math.round(e.loaded / e.total * 100)}`; });
+  api.error.on(e => { status.textContent = "Hata: " + (e && e.message ? e.message : e); console.error(e); });
+  api.playerReady.on(() => {
+    playerReady = true; $("play").disabled = false; $("stop").disabled = false;
+    status.textContent = "Hazır."; muteTab();
+  });
+  api.playerStateChanged.on(e => { $("play").textContent = e.state === 1 ? "Duraklat" : "Çal"; });
+
+  $("file").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    status.textContent = "Dosya okunuyor...";
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      api.load(buf);                       // sonuç: scoreLoaded -> bilgi + görünüm (applyMode) + çizim
+    } catch (err) { status.textContent = "Dosya açılamadı: " + err.message; }
+  };
+  api.scoreLoaded.on(() => setTimeout(applyMode, 0));
+
+  $("mode").onchange = applyMode;
+  $("play").onclick = () => api.playPause();
+  $("stop").onclick = () => api.stop();
+  $("speed").oninput = e => { const v = +e.target.value; $("speedv").textContent = v + "%"; api.playbackSpeed = v / 100; };
+  $("zoom").oninput = e => {
+    const v = +e.target.value; $("zoomv").textContent = v + "%";
+    api.settings.display.scale = v / 100; api.updateSettings(); api.render();
+  };
+})();
+</script>
+</body>
+</html>

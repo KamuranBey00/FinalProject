@@ -187,6 +187,7 @@ def bar_times(cqt: np.ndarray, args, device) -> Tuple[np.ndarray, float]:
 
 def main(args) -> int:
     from gtab.data.features import cqt_from_file
+    from gtab.data.separate import cqt_from_file_separated
     from gtab.decoding.decode import render_ascii_tab
     from gtab.utils import get_device
     audio = resolve_audio(args.audio)
@@ -197,7 +198,7 @@ def main(args) -> int:
     if instr.tuning != INSTR.tuning and args.w_transition != 0:
         raise TranscribeError("standart disi akort / kapo icin ogrenilen gecis modeli yok: --w-transition 0 kullan")
     try:
-        cqt = cqt_from_file(str(audio))
+        cqt = cqt_from_file_separated(str(audio), args.separate) if args.separate != "none" else cqt_from_file(str(audio))
     except Exception as e:                      # bozuk/desteklenmeyen ses: sahte cikti uretme
         raise TranscribeError(f"ses okunamadi ({type(e).__name__}): {e}") from None
     dur = cqt.shape[0] / FRAME_RATE
@@ -241,6 +242,8 @@ if __name__ == "__main__":
     ap.add_argument("--audio", required=True, help="ses dosyasi (.wav)")
     ap.add_argument("--domain", default="gaps_val", choices=sorted(DOMAINS),
                     help="kalibrasyon alani (varsayilan: gaps_val = klasik gitar)")
+    ap.add_argument("--separate", default="none", choices=["none", "mix-vocals"],
+                    help="sarkili kayit: mix-vocals = vokali cikar (Demucs; GPU'da hizli, CPU'da yavas)")
     ap.add_argument("--ckpt", default=DEFAULT_CKPT)
     ap.add_argument("--cal", default=DEFAULT_CAL)
     # 0 = greedy, the setting every reported "heard position" number was measured with

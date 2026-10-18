@@ -1,0 +1,8 @@
+{
+  "acoustic": "tabcrnn_deep2.pt",
+  "cal": "tabcrnn_deep2.cal.json",
+  "beat_net": "beat_net.pt",
+  "rhythm_q": "rhythm_q.pt",
+  "edition": "edition_seq_rec_s2.pt",
+  "transitions": "transitions.npz"
+}

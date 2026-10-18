@@ -51,3 +51,10 @@ def separate(y, sr=22050, mode="mix-vocals"):
     out = librosa.resample(out, orig_sr=_DEMUCS_SR, target_sr=sr)
     out = out[:n] if len(out) >= n else np.pad(out, (0, n - len(out)))
     return out.astype(np.float32)
+
+
+def cqt_from_file_separated(path, mode="mix-vocals"):
+    """Ürün yolu (şarkılı kayıt): dosya -> kaynak ayırma -> log-CQT. `cqt_from_file`'ın ayrılmış karşılığı."""
+    from gtab.config import SAMPLE_RATE
+    from gtab.data.features import compute_cqt, load_audio
+    return compute_cqt(separate(load_audio(path), SAMPLE_RATE, mode))
