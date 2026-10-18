@@ -124,6 +124,9 @@ Dosyaların görevleri ve tüm geçmiş özet: `CONTRIBUTING.md`.
   taban deep2. **İnsan sesi: `eval_robust --separate mix-vocals` (Demucs, karışım − vokal) KABUL** (temiz +0.001, şarkı 10 dB +0.084,
   konuşma +0.076; ürüne alma ayrı karar). **Adım 3 akort / kapo KABUL** (`parse_tuning`, `gtab/decoding/retune.py`; akustik çözümleme hep
   STANDARD_6; gaps_fit konum +0.08; D2 / D#2 model aralığı dışı). 17 Ekim: **kendi kayıtlarımız bekleniyor** (0c). Plan: `.omc/plans/`.
+- **README20 (18 Ekim, not):** ara sıra YouTube / dış platformlardan senkron tablı (icracı yazmış, naylon, gerçek ses) videolarla
+  gerçek dünya kontrolü — eğitim verisi değil, ana ölçüt değil. İlk deneme (The Last of Us, Part 1): perde F1 0.835, tel 0.559
+  (açık tel yerine basılı konum; bas E2 yeniden algılama). Sırada: aynı ses edisyon modunda.
 - **Temizlik (10 Ekim):** eski / reddedilen kod `archive/` (bkz. `archive/README.md`), eski checkpoint'ler
   `checkpoints/archive/`. Aktif: data betikleri, `train_onset`, `train_edition_seq`, `eval_pitch`, `diagnose_pitch`,
   `eval_hmm`, `eval_edition`; checkpoint `tabcrnn_deep2.pt` (+cal), `edition_seq.pt`, `transitions.npz`.

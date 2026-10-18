@@ -236,6 +236,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README17.md](docs/devlog/README17.md) — Katman 5 Adım 3 (ölçü kaydırma + tap modu: kullanıcı dokunuşlarıyla ritim);
   Ek A Armağan dalı birleşimi (eski hata düzeltmeleri, testler, Katman 4 hazırlığı); Ek B model yığını + bağımlılık denetimi
 - [docs/devlog/README18.md](docs/devlog/README18.md) — Katman 6 (gerçek dünya: kayıt koşulu, polifoni, akort, kendi kayıtlarımız; [kayıt protokolü](docs/KAYIT_PROTOKOLU.md))
+- [docs/devlog/README19.md](docs/devlog/README19.md) — Katman 5.2 ürünleştirme (şarkılı kayıt `--separate`, parmak modeli `edition_seq_rec_s2.pt`, TAB görüntüleyici `scripts/app/tab_viewer.html`)
+- [docs/devlog/README20.md](docs/devlog/README20.md) — Not: geldiğimiz nokta + YouTube / dış platformlardan senkron tablı videolarla ara doğrulama (eğitim değil; ilk deneme perde F1 0.835, tel 0.559)
 
 ## Yol haritası
 
@@ -275,7 +277,8 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
       seçenek) + tap tempo, Armağan birleşimi, model yığını ([README17](docs/devlog/README17.md))
 - [ ] Katman 6 — Zorlaştırma: polifoni (akorlar), kayıt koşulu dayanıklılığı (distortion yerine: oda, telefon, gürültü),
       farklı gitar/akort desteği, kendi test setimiz — **sürüyor** ([README18](docs/devlog/README18.md)): Adım 0 ölçümü;
-      dayanıklılık eğitimi kabul edilmedi; insan sesi kaynak ayırmayla (`--separate mix-vocals`) ve akort / kapo kabul; kendi kayıtlarımız bekleniyor
+      dayanıklılık eğitimi kabul edilmedi; insan sesi kaynak ayırmayla (`--separate mix-vocals`) ve akort / kapo kabul; kendi kayıtlarımız bekleniyor; ara sıra YouTube senkron
+      tablı videolarla gerçek dünya kontrolü ([README20](docs/devlog/README20.md))
 
 **Açık notlar (kapanmadı):** A teli tel doğruluğu (solo, oracle notalar) `tabcrnn_gaps.pt` 0.600 → deep2 **0.641** — ileride
-dönülecek (README17 Ek B); tremolo Katman 4'te; `edition_seq_rec.pt` ürüne alınacak (acelesi yok).
+dönülecek (README17 Ek B); tremolo Katman 4'te; parmak modeli ürüne alındı (`edition_seq_rec_s2.pt`, README19).
