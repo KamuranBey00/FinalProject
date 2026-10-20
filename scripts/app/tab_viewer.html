@@ -34,13 +34,15 @@
   .at-highlight * { fill: #2f6fb3; stroke: #2f6fb3; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alphaTab.min.js"></script>
+<!-- naylon gitar ses bankası (CC0, base64 .js: file:// ile de yüklenir); yoksa CDN'deki sonivox kullanılır -->
+<script src="soundfont/nylon_guitar.sf3.js"></script>
 </head>
 <body>
 <main>
   <h1>TAB görüntüleyici</h1>
   <p class="help"><b>TAB nasıl okunur:</b> 6 çizgi = 6 tel (en alttaki çizgi en kalın tel), çizgi üzerindeki sayı = basılacak perde
      (0 = boş tel). Sol el parmak numaraları (1 işaret, 2 orta, 3 yüzük, 4 serçe) yalnız "edisyon" modu çıktısında nota satırının üstünde görünür.
-     <code>transcribe</code> ile üretilen <code>.musicxml</code> dosyasını seç. İnternet gerekir (alphaTab ve ses bankası CDN'den yüklenir).</p>
+     <code>transcribe</code> ile üretilen <code>.musicxml</code> dosyasını seç. İnternet gerekir (alphaTab CDN'den yüklenir; naylon gitar ses bankası <code>soundfont/</code> klasöründen).</p>
 
   <div class="bar">
     <input type="file" id="file" accept=".musicxml,.xml,.mxl">
@@ -78,15 +80,25 @@
     return;
   }
 
+  // sonivox: 128 GM enstrümanı 1.3 MB'ta (naylon = 3 adet 20–60 ms döngülü örnek) -> tiz, "vızıltılı" ses
+  // gömülü baytlar blob: adresine çevrilir; alphaTab onu CDN dosyası gibi kendi zamanında yükler
+  // (oynatıcı hazır olmadan çağrılan api.loadSoundFont sessizce kayboluyor)
+  const localFont = window.GTAB_SOUNDFONT_B64
+    ? URL.createObjectURL(new Blob([Uint8Array.from(atob(window.GTAB_SOUNDFONT_B64), c => c.charCodeAt(0))]))
+    : null;
   const api = new alphaTab.AlphaTabApi($("score"), {
     core: { fontDirectory: CDN + "font/", scriptFile: CDN + "alphaTab.min.js" },
     display: { staveProfile: alphaTab.StaveProfile.ScoreTab, scale: 1.0 },
     player: {
       enablePlayer: true,
-      soundFont: CDN + "soundfont/sonivox.sf2",
+      soundFont: localFont || CDN + "soundfont/sonivox.sf2",
       scrollElement: $("viewport"),
     },
   });
+  // uzun çınlayan naylon örnekleri akorlarda üst üste biner ve tavanı aşarsa kırpılır (cızırtı). 0.5 = gaps_train'de
+  // parçaların %97'sinde kırpılmasız en yüksek düzey (0.6'da %76); gaps_test'te 30/30 temiz (README21).
+  // playerReady'de uygulanır: oynatıcı hazır olmadan verilen ayarlar kaybolabiliyor (loadSoundFont'ta görüldü)
+  const MASTER_VOLUME = 0.5;
 
   let score = null, tracksByKind = {}, playerReady = false;
 
@@ -145,7 +157,19 @@
     api.changeTrackMute([sc], false);
   }
 
+  // her iz naylon gitar (GM 24) çalar: ses bankasında yalnız 24 var ve <midi-program> yazılmadan önce üretilmiş
+  // dosyalar 0 (piyano) ister -> sessiz kalırdı. Okuyucu ilk vuruşa enstrüman otomasyonu da koyduğu için o da değişir.
+  const NYLON_PROGRAM = 24;
+  function forceNylon(s) {
+    for (const t of s.tracks) {
+      t.playbackInfo.program = NYLON_PROGRAM;
+      for (const st of t.staves) for (const bar of st.bars) for (const v of bar.voices) for (const beat of v.beats)
+        for (const a of beat.automations) if (a.type === alphaTab.model.AutomationType.Instrument) a.value = NYLON_PROGRAM;
+    }
+  }
+
   api.scoreLoaded.on(s => {
+    forceNylon(s);
     score = s; showInfo(s);
     $("empty").style.display = "none";
     $("tempoNote").textContent = "";
@@ -156,6 +180,7 @@
   api.error.on(e => { status.textContent = "Hata: " + (e && e.message ? e.message : e); console.error(e); });
   api.playerReady.on(() => {
     playerReady = true; $("play").disabled = false; $("stop").disabled = false;
+    api.masterVolume = MASTER_VOLUME;
     status.textContent = "Hazır."; muteTab();
   });
   api.playerStateChanged.on(e => { $("play").textContent = e.state === 1 ? "Duraklat" : "Çal"; });

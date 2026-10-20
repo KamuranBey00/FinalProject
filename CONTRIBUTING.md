@@ -125,6 +125,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `data/build_hex.py`, `data/build_contour.py` | Hex tel spektrumu ve F0 konturu önbellekleri |
 | `data/build_rhythm.py` | Ritim etiketleri (GAPS + GuitarSet) → `data/cache/rhythm/` |
 | `data/build_beat_feats.py` | deep2 gövde temsili önbelleği → `data/cache/beat_feats/<ckpt>/` (vuruş ağı girdisi) |
+| `data/build_soundfont.py` | TAB görüntüleyicinin naylon gitar ses bankası: FreePats SF2 (CC0) → program 24 + de-click + SF3 → `app/soundfont/nylon_guitar.sf3.js` (README21) |
 | `train/train_onset.py` | Ses modeli eğitimi (onset/offset/perde-onset kafaları, derin CNN; güncel taban deep2) |
 | `train/train_edition_seq.py` | Edisyon önerisi dizi modeli (sembolik, ~2 dk) |
 | `train/train_rhythm_q.py` | Bağlamlı kuantalayıcı (sembolik, vuruş/nota bozma artırması; ~11 dk) → `rhythm_q.pt` |
@@ -135,6 +136,7 @@ kaydırarak veri çoğaltma, teli yalnızca vuruş anından seçmek.
 | `eval/eval_edition.py` | Edisyon önerisi: tel uyumu, parmak (ürün sayısı), uçtan uca (deep2 notaları) |
 | `eval/eval_score.py` | Ölçülü TAB: MusicXML gidiş-dönüş + uçtan uca ölçü içi konum (Adım 2) + ölçü kaydırma tavanı + tap modu simülasyonu (Adım 3) |
 | `app/tap_recorder.html` | Tarayıcıda dokunuş kaydedici (tap modu): ses çal, BOŞLUK ile vuruşlar → `<kayıt>.txt` |
+| `app/tab_viewer.html` | `.musicxml` görüntüleyici + çalma (alphaTab; naylon gitar ses bankası `app/soundfont/`, ses düzeyi 0.5; README21) |
 | `app/transcribe.py` | Ürün komutu: ses (ya da .npz) + `--bpm` ya da `--taps` + `--meter` (+ `--mode`, `--shift`) → `.musicxml` |
 | `app/transcribe_ascii.py` | Ses → nota tablosu + ASCII TAB (`--fingering`; `--meter` + `--taps` / `--bpm` ile ölçü çizgileri) |
 | `eval/check_stack.py` | Model yığını denetimi (`--set` ile yeni taban); eskiyen parçalar için yeniden üretme komutları |

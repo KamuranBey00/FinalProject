@@ -238,6 +238,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README18.md](docs/devlog/README18.md) — Katman 6 (gerçek dünya: kayıt koşulu, polifoni, akort, kendi kayıtlarımız; [kayıt protokolü](docs/KAYIT_PROTOKOLU.md))
 - [docs/devlog/README19.md](docs/devlog/README19.md) — Katman 5.2 ürünleştirme (şarkılı kayıt `--separate`, parmak modeli `edition_seq_rec_s2.pt`, TAB görüntüleyici `scripts/app/tab_viewer.html`)
 - [docs/devlog/README20.md](docs/devlog/README20.md) — Not: geldiğimiz nokta + YouTube / dış platformlardan senkron tablı videolarla ara doğrulama (eğitim değil; ilk deneme perde F1 0.835, tel 0.559)
+- [docs/devlog/README21.md](docs/devlog/README21.md) — Not: TAB görüntüleyici sesi piyano → naylon gitar (FreePats CC0, de-click, ses düzeyi 0.5); 300 GAPS kaydında TAB birebir aynı, tık ve kırpılma giderildi
 
 ## Yol haritası
 

@@ -16,6 +16,9 @@ ALTER = (0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0)
 BEAT_UNIT = {1.0: ("quarter", 0), 2.0: ("half", 0), 1.5: ("quarter", 1), 0.5: ("eighth", 0), 4.0: ("whole", 0)}
 DOCTYPE = ('<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
            '"http://www.musicxml.org/dtds/partwise.dtd">\n')
+# MusicXML <midi-program> is 1-based: 25 = General MIDI 24 "Acoustic Guitar (nylon)". Without it players fall back to
+# program 0 (piano) — alphaTab even pins that as a first-beat automation, so the viewer cannot override it later.
+MIDI_PROGRAM_NYLON = 25
 
 
 def _sub(el, tag, text=None, **attr):
@@ -97,7 +100,10 @@ def write_musicxml(path, measures, pitch, string, fret, sig, beat_q, bpm=None, f
     _sub(_sub(root, "work"), "work-title", title)
     pl = _sub(root, "part-list")
     for pid, name in (("P1", "Gitar"), ("P2", "TAB")):
-        _sub(_sub(pl, "score-part", id=pid), "part-name", name)
+        sp = _sub(pl, "score-part", id=pid)
+        _sub(sp, "part-name", name)
+        _sub(_sub(sp, "score-instrument", id=f"{pid}-I1"), "instrument-name", "Classical Guitar")
+        _sub(_sub(sp, "midi-instrument", id=f"{pid}-I1"), "midi-program", MIDI_PROGRAM_NYLON)
     for pid, tab in (("P1", False), ("P2", True)):
         part = _sub(root, "part", id=pid)
         for k, pieces in enumerate(measures):
