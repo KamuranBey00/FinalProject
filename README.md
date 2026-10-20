@@ -132,6 +132,8 @@ archive/                    eski ve reddedilen kod (Katman 2–3.8 eğitimleri, 
 data/cache/                 önbellek (.npz): train, val, train_comp, val_comp, gaps_*, synthtab_*  -- git'e girmez
 data/raw/                   ham veri (GAPS, SynthTab zip'leri)                                  -- git'e girmez
 docs/devlog/                katman katman geliştirme günlüğü
+docs/results/gv/            farklı gitar sesleri testlerinin sonuç tabloları (README22)
+eval_data/                  paylaşılabilir test sesleri (Commons, Ichiyanagi) + lisansları
 inputs/                     proje sunumu ve katman karar belgeleri
 ```
 
@@ -239,6 +241,7 @@ gerekçeleri [docs/devlog/](docs/devlog/) klasöründe korunmaktadır:
 - [docs/devlog/README19.md](docs/devlog/README19.md) — Katman 5.2 ürünleştirme (şarkılı kayıt `--separate`, parmak modeli `edition_seq_rec_s2.pt`, TAB görüntüleyici `scripts/app/tab_viewer.html`)
 - [docs/devlog/README20.md](docs/devlog/README20.md) — Not: geldiğimiz nokta + YouTube / dış platformlardan senkron tablı videolarla ara doğrulama (eğitim değil; ilk deneme perde F1 0.835, tel 0.559)
 - [docs/devlog/README21.md](docs/devlog/README21.md) — Not: TAB görüntüleyici sesi piyano → naylon gitar (FreePats CC0, de-click, ses düzeyi 0.5); 300 GAPS kaydında TAB birebir aynı, tık ve kırpılma giderildi
+- [docs/devlog/README22.md](docs/devlog/README22.md) — Not: farklı gitar sesleriyle test altyapısı (`scripts/eval/gv`, veri `python -m scripts.data.fetch_gv_data`); kusur haritası: aynı tele iki nota, fazladan üst ses notaları, ses modu tel %56
 
 ## Yol haritası
 

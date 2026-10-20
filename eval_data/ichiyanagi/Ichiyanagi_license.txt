@@ -1,0 +1,15 @@
+Classical Guitar Soundfont 'Ichiyanagi'
+
+------------------------
+
+Version V1_03 (April 05 2020)
+Author : Ziya Mete Demircan (Editing) and Kazuma Yamamoto (Sampling)
+
+The license is under CC BY-NC 4.0 (Attribution-NonCommercial 4.0 International)
+https://creativecommons.org/licenses/by-nc/4.0/
+
+Share — copy and redistribute the material in any medium or format
+Adapt — remix, transform, and build upon the material
+NonCommercial — You may not use the material for commercial purposes.
+
+Exception: Works arising from the use of Soundfont as a tool are excluded. (like: Musical works exported as audio and/or video). The user can freely use them.

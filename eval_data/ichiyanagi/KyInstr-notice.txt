@@ -1,0 +1,2 @@
+If you are going to use KYInsruments-xml, make sure the guitar is visible at the top in the Synthesizer.
+Otherwise, (maybe) musescore's standard guitar instrument is defined and additional channels will not find the necessary patches.

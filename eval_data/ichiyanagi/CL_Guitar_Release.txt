@@ -1,0 +1,49 @@
+Classical Guitar 'Ichiyanagi' ver1.02 Release
+https://www.hedsound.com/2020/03/classical-guitar-ichiyanagi-custom.html
+
+All discussion here
+[Classical Guitar Soundfont](https://musescore.org/en/node/300894)
+
+After great help by Ziya Mete Demircan,
+We created Classical Guitar Soundfont.
+
+* Recorded & Sampled by: "Kazuma Yamamoto"
+* Sound font editing & additional instruments : "Ziya Mete Demircan"
+
+Containing of;
+* Cl.Guitar Ichiyanagi
+	* Cl.Guitar vib (vibrato)
+	* Cl.Guitar leg (legato)
+	* Cl.Guitar leg + vib
+	* Cl.Guitar muted
+	* Cl.Guitar Harmonics
+	* Cl.Gt open_str
+
+* Cl.Gt. 12Str oct-up (+octave higher)
+* Cl.Gt. 12Str oct-dn (+octave lower)
+
+* Cl.Guitar2 (hi)
+	* Cl.Guitar2 vib (vibrato)
+	* Cl.Guitar2 leg (legato)
+	* Cl.Guitar2 leg + vib
+	* Cl.Guitar2 muted
+	* Cl.Guitar2 Harmonics
+* Cl.Gt. 12Str2 oct-up (+octave higher)
+* Cl.Gt. 12Str2 oct-dn (+octave lower)
+
+
+***
+
+* Create two sets of samples / normal & harmonics tones 
+* Guitar : Kazuo / Kunihiko Ichiyanagi (Aichi Japan 2004)
+* Mono recording
+* Range : C2-E6 (C4=60) // or C1-E5 (C3=60)
+* Microphone : AKG C214 (Condenser Microphone)
+* Audio Interface : Alesis io2
+* Sound editor : Audacity
+* Soundfont editor : Polyphone
+
+for Musescore: By locating **KYInstruments-v2_1.xml** file, you can select different sounds (sub bank, muted, harmonics etc..) in different voices.
+How to locate; 
+https://musescore.org/en/comment/982493#comment-982493
+
