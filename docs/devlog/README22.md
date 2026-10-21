@@ -203,8 +203,16 @@ tercihi arasındaki log-olasılık farkı < τ olan notalarda edisyon teli (akor
 - "Hayaletlerin çoğu etiket hatası" hipotezi zayıf: etiket boşluğu %1–2. Etiket kaynaklı olabilecek en çok %9 (kaymış).
 - Dinleme / görsel kontrol için rastgele 30 üst ses dışı hayalet: `docs/results/gv/ghost_sample_gaps_{val,test}.csv`.
 
+### Adım 5B — açık tel (sempatik titreşim) kuralla çözülür mü? — HAYIR, kural eklenmedi
+`open_strings`: açık tel perdesindeki bulunmuş notalar (E2 A2 D3 G3 B3 E4); "tetikleyici" = o anda çalan, bulunmuş başka
+bir nota (açık telin bir kısmi sesine denk: aralık 0 / 7 / 12 / 19 / 24). gaps_val: sahte 1737 / gerçek **6863** (açık
+teller çok çalınıyor); tetikleyicili 513 / 1069, tetikleyicisiz 1224 / 5794. Gerçek tetikleyicili notalar daha güçlü
+(onset tepesi medyan 0.67 / 0.54, yükseliş 12.0 / 6.6 dB) ama dağılımlar iç içe. "Tetikleyici ve tepe < x ve yükseliş < y"
+kuralı en temkinlide 32 sahte / 7 gerçek siler (tüm sahtelerin %0.7'si, nota F1 ≈ +0.001), gevşedikçe 303 / 251'e varır;
+gaps_test aynı (37 / 5 … 268 / 200). Güvenilir bir kural yok → ikinci aşamaya (eğitim).
+
 ## Sıradaki
-- Adım 5: onset'le başlayan üst ses hayaletleri (gaps_test ~3300) kuralla ayrılamadı → model düzeyinde (tını
-  çeşitlendirmeli / vadi hedefli eğitim).
+- İkinci aşama (eğitim; kullanıcı kararı, önce konuşulacak): parça (%31) ve üst ses (%25) hayaletleri, açık tel
+  sahteleri; ritim tarafında vuruş takibi (yarı otomatik konum 0.590, tap ideal 0.921).
 - ✓ (22 Ekim) `fetch_gv_data` kütüphane listesi: MG Soft Nylon Guitar (Lite), RJS LoFi Nylon ve MDM Classical
   Guitar v1.01 pianobook paket sayfaları (ücretsiz hesapla indiriliyor), Custom SF2 polyphone.

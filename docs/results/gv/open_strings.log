@@ -1,0 +1,30 @@
+gaps_val: open-string-pitch notes ghost / real (1737, 6863)
+  with a detected trigger sounding: ghost / real (513, 1069); without: (1224, 5794)
+  fallback origin: ghost / real (238, 184)
+  triggered ghost n   513  onset peak p10/25/50/75 [0.066, 0.405, 0.54, 0.654]  rise dB [1.779, 3.776, 6.604, 10.599]  pitch prob [0.376, 0.456, 0.613, 0.799]  dur s [0.121, 0.232, 0.395, 0.627]
+  triggered real  n  1069  onset peak p10/25/50/75 [0.411, 0.529, 0.671, 0.807]  rise dB [5.129, 7.714, 12.0, 16.092]  pitch prob [0.483, 0.592, 0.703, 0.812]  dur s [0.163, 0.279, 0.464, 0.882]
+  rule 'trigger AND onset peak < x AND rise < y' removes ghost / real:
+    peak < 0.3, rise <  3.0 dB: (0, 0)
+    peak < 0.3, rise <  6.0 dB: (32, 7)
+    peak < 0.3, rise < 10.0 dB: (72, 23)
+    peak < 0.5, rise <  3.0 dB: (5, 3)
+    peak < 0.5, rise <  6.0 dB: (51, 21)
+    peak < 0.5, rise < 10.0 dB: (138, 77)
+    peak < 0.7, rise <  3.0 dB: (65, 25)
+    peak < 0.7, rise <  6.0 dB: (176, 93)
+    peak < 0.7, rise < 10.0 dB: (303, 251)
+gaps_test: open-string-pitch notes ghost / real (1452, 6236)
+  with a detected trigger sounding: ghost / real (456, 928); without: (996, 5308)
+  fallback origin: ghost / real (334, 181)
+  triggered ghost n   456  onset peak p10/25/50/75 [0.02, 0.194, 0.487, 0.639]  rise dB [1.715, 4.26, 7.398, 11.363]  pitch prob [0.378, 0.446, 0.581, 0.76]  dur s [0.174, 0.279, 0.418, 0.743]
+  triggered real  n   928  onset peak p10/25/50/75 [0.416, 0.512, 0.671, 0.82]  rise dB [5.475, 8.261, 11.986, 16.267]  pitch prob [0.483, 0.59, 0.725, 0.844]  dur s [0.209, 0.302, 0.546, 0.929]
+  rule 'trigger AND onset peak < x AND rise < y' removes ghost / real:
+    peak < 0.3, rise <  3.0 dB: (0, 0)
+    peak < 0.3, rise <  6.0 dB: (37, 5)
+    peak < 0.3, rise < 10.0 dB: (90, 19)
+    peak < 0.5, rise <  3.0 dB: (10, 3)
+    peak < 0.5, rise <  6.0 dB: (64, 28)
+    peak < 0.5, rise < 10.0 dB: (153, 86)
+    peak < 0.7, rise <  3.0 dB: (57, 13)
+    peak < 0.7, rise <  6.0 dB: (144, 66)
+    peak < 0.7, rise < 10.0 dB: (268, 200)
