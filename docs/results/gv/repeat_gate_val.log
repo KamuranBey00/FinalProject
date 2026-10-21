@@ -1,0 +1,22 @@
+gaps_val: selection rules {'off_ratio': 0.5, 'refractory': 3, 'fallback': 10, 'reattack': 0.5, 'rise_keep': 6.0, 'rise_split': 8.0, 'combine': 'noisyor', 'onset_source': 'pitch'}
+
+all pairs (IOI < 250 ms): real repeats 762, false splits 754
+    gate ended  real    79  false    10
+    gate onset  real   602  false   613
+    gate rise   real    56  false    57
+    gate split  real    25  false    74
+    real  IOI s [0.116, 0.163, 0.209]  onset peak [0.588, 0.726, 0.843]  rise dB [4.476, 7.909, 11.815]
+    false IOI s [0.116, 0.163, 0.209]  onset peak [0.513, 0.573, 0.653]  rise dB [0.564, 1.906, 4.859]
+
+same TAB position: real repeats 34, false splits 63
+    gate ended  real     1  false     0
+    gate onset  real    28  false    48
+    gate rise   real     3  false    11
+    gate split  real     2  false     4
+    real  IOI s [0.07, 0.093, 0.093]  onset peak [0.572, 0.702, 0.841]  rise dB [5.133, 7.1, 10.394]
+    false IOI s [0.093, 0.093, 0.116]  onset peak [0.507, 0.582, 0.656]  rise dB [1.9, 4.599, 9.003]
+
+onset-gate pairs 1215: kept real / kept false for 'peak >= hi or rise >= r'
+    hi 0.6  r>=2:  589 /  420   r>=3:  578 /  381   r>=4:  568 /  350
+    hi 0.7  r>=2:  574 /  335   r>=3:  548 /  280   r>=4:  523 /  230
+    hi 0.8  r>=2:  565 /  290   r>=3:  523 /  227   r>=4:  486 /  168

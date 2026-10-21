@@ -19,7 +19,7 @@ from gtab.decoding.beat_dbn import dbn_decode
 from gtab.decoding.edition import order_notes
 from gtab.decoding.retune import remap_probs
 from gtab.decoding.taps import meter_phase, taps_to_beats
-from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice
+from gtab.decoding.transitions import TransitionModel, build_lattice, decode_lattice, resolve_chord_strings
 from gtab.decoding.viterbi import energy_rise, segment
 from gtab.evaluation.pitch_eval import load_selection
 from gtab.models.beat_net import activations, encode_features, load_beat_net
@@ -28,6 +28,7 @@ from gtab.models.edition_net import predict as edition_predict
 from gtab.models.inference import load_model, predict_heads
 from gtab.models.rhythm_net import load_rhythm_net
 from gtab.models.rhythm_net import predict as rhythm_predict
+from gtab.models.rhythm_net import separate_strings
 from gtab.models.stack import active, check
 from gtab.paths import ckpt_path
 from gtab.render.score import build_measures, meter_of_signature
@@ -61,12 +62,19 @@ def heard_positions(segs, probs, tm, instrument=STANDARD_6, w_transition=0.0):
     akort geçiş modeli -> nota başına (tel, perde) | (None, None). instrument = kullanıcı akortu (kapo dahil, with_capo;
     perdeler kapodan): olasılıklar remap_probs ile taşınır, geçiş modeli o akortta ağırlıksız kurulur (öğrenilen ağırlıklar
     standart akortta eğitildi) -> yalnız w_transition = 0. Standart akortta eski yol birebir.
+    Akor kısıtı (README22 Adım 2B): aynı anda (order_notes, 30 ms) başlayan notalar ayrı tellere.
     """
     if tuple(instrument.tuning) != tuple(tm.instrument.tuning) or instrument.num_frets != tm.instrument.num_frets:
         if w_transition != 0:
             raise ValueError("standart disi akortta ogrenilen gecis modeli yok: w_transition 0 olmali")
         probs, tm = remap_probs(probs, tm.instrument, instrument), TransitionModel(instrument)
-    return decode_lattice(build_lattice(segs, probs, tm), 1.0, w_transition)
+    lattice = build_lattice(segs, probs, tm)
+    picks = decode_lattice(lattice, 1.0, w_transition)
+    if not len(segs):
+        return picks
+    o, chord = order_notes(np.array([(a / FRAME_RATE, b / FRAME_RATE, p) for a, b, p in segs], float))
+    grp = np.cumsum(~chord) - 1
+    return resolve_chord_strings(lattice, picks, [o[grp == g].tolist() for g in np.unique(grp)])
 
 
 def analyze(cqt, m, mode="ses", instrument=STANDARD_6):
@@ -115,7 +123,8 @@ def rhythm(an, m, sig, bpm=None, taps=None, tol=USER_TOL, trans=USER_TRANS, shif
         beats, downs, _ = dbn_decode(an["act"], meters=(M,), min_bpm=bpm / (1 + tol), max_bpm=bpm * (1 + tol),
                                      trans_lambda=trans, obs_lambda=m["dbn"].get("obs_lambda", 16))
         d0 = int(np.searchsorted(beats, downs[0])) if len(downs) else 0
-    q = rhythm_predict(m["qnet"], an["notes"], beats, m["device"], m["lam"])
+    q, cand, lp = rhythm_predict(m["qnet"], an["notes"], beats, m["device"], m["lam"], scores=True)
+    q = separate_strings(q, cand, lp, an["notes"], an["string"], m["lam"])   # README22 Adım 2C: ritim sıkışması
     measures, first = build_measures(q, d0 + shift, M, beat_q)
     return dict(beats=beats, downbeats=downs, q=q, measures=measures, first_beat=first, sig=sig, beat_q=beat_q,
                 downbeat_index=d0 + shift)

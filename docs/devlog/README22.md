@@ -76,6 +76,65 @@ python -m scripts.eval.gv.string_analysis
 Son sonuç dosyaları: `test_a.csv`, `test_b_trimmed.csv`, `test_e_commons_v2.csv`, `test_f_youtube_v2.csv`
 (`test_b_untrimmed.csv`, `*_commons.csv`, `test_f_youtube.csv` = düzeltme öncesi, karşılaştırma için).
 
+## Adım 2 — TAB'da aynı tele iki nota (21 Ekim 2026)
+**Teşhis** (`clash_rhythm`, GAPS partisyonuna göre; kullanıcı girdisi taklidi eval_score B ile aynı). Ses modu
+gaps_test 641 çakışma: %68 fazladan nota (192 aynı perde kopyası, 155 aynı anda hayalet), %20 ritim sıkışması,
+yalnız %12 gerçek akorda yanlış tel. İlk öneri "aynı konumdaki aynı perdeyi tek yaz" **reddedildi** (kullanıcı:
+gerçek tekrarları da siler) — ölçüldü: aynı konuma düşen aynı perde çiftlerinin 34'ü gerçek tekrar, 63'ü sahte.
+
+**A. İki kanıtlı yeniden vuruş kapısı** (`viterbi.segment_notes_onset` `reattack_hi`, `reattack_rise`; 0 = kapalı).
+`repeat_gate`: aynı perde çiftlerinde gerçek tekrar ve sahte bölünme sayıca eşit (762 / 754) ve aynı IOI'de; sahteler
+yeniden vuruş kapısından (tepe ≥ 0.5) geçiyor ama eşiğin hemen üstünde ve enerjisiz (medyan tepe 0.57, yükseliş 1.9 dB;
+gerçek 0.73, 7.9 dB). README12'deki vadi kanıtı bu ikisini ayıramamıştı. Seçim gaps_val'de, aktif seçimin ölçütüyle
+(`mix` = (nota F1 + kare F1) / 2; kayıtlı 0.734 birebir üretildi) + hızlı tekrar kaçma en çok +0.01
+(`calibrate_reattack`). Tek uygun aday **tepe ≥ 0.6 ya da yükseliş ≥ 2 dB** (kullanıcı seçimi; daha güçlü 0.7 / 4 dB
+nota F1 +0.015 verip gaps_val'de tekrarların ~%6'sını kaçırıyordu). gaps_test: nota F1 0.779 → 0.786 (P 0.746 → 0.762,
+R 0.814 → 0.813), kare F1 0.701 aynı, hızlı tekrar kaçma 0.476 → 0.478; aynı perde kopyası çakışması 192 → 149.
+Yalnız `gaps_val` seçimi değişti (`checkpoints/tabcrnn_deep2.cal.json`); GuitarSet (`val`) kuralları aynı.
+
+**B. Ses modunda akor kısıtı** (`transitions.resolve_chord_strings`, `pipeline.heard_positions`): aynı anda (30 ms,
+`order_notes`) başlayan notalar ayrı tellere, emisyon log-olasılıkları toplamı en yüksek atamayla; çakışmasız gruplar
+birebir. Tel doğruluğu (`chord_effect`) gaps_val 0.6283 → 0.6287, gaps_test 0.6198 → 0.6216 (nötr); <30 ms çakışmalar
+gaps_test 212 → 8. Edisyon modu değişmedi.
+
+**C. Ritim sıkışması** (`rhythm_net.separate_strings`, `pipeline.rhythm`): farklı perdeli iki nota aynı konuma ve aynı
+tele düşerse, ritim ağının o konumu daha az olası bulduğu nota komşu bir konuma alınır (önceki geri, sonraki ileri;
+sıra bozulmaz), decode'un ölçütüyle (log-olasılık − lam × ızgara karmaşıklığı). "Hep sonrakini kaydır" gaps_val'de
+konumu 0.001–0.003 düşürüyordu → reddedildi. `eval_score` (kapalı → açık):
+
+| | gaps_val | gaps_test (rapor) |
+|---|---|---|
+| ölçü içi konum / tek imli (yarı otomatik) | 0.570 / 0.560 → 0.570 / 0.560 | 0.593 / 0.611 → 0.590 / 0.608 |
+| IOI | 0.733 → 0.732 | 0.693 → 0.690 |
+| tap ideal konum / IOI | 0.801 / 0.885 → 0.801 / 0.886 | 0.921 / 0.920 → 0.919 / 0.921 |
+| tap kaba konum / IOI | 0.694 / 0.733 → 0.696 / 0.744 | 0.805 / 0.819 → 0.803 / 0.823 |
+| ölçü başı F, vuruş F, geri okuma, gidiş-dönüş | aynı | aynı |
+
+gaps_test'te yarı otomatik konum −0.003 kalıyor (deterministik, gürültü değil); seçim setinde fark yok.
+
+**Toplam (ses modu TAB çakışması):** gaps_val 465 → **119**, gaps_test 641 → **153**; edisyon 438 → 164. Kalan:
+146 aynı perde kopyası (A'nın kapısından geçecek kadar kanıtlı; dokunulmadı), 6 aynı perdeli gerçek tekrar
+sıkışması, 1 akor. Testler 228 (yeni: `test_reattack_gate`, `test_chord_strings`, `test_separate_strings`);
+çıkarım parmak izi aynı.
+
+**D. Aynı perdeli çiftler de ritim kuralıyla** (kullanıcı kararı: birleştirmek gerçek tekrarı siler, kaydırmak hiçbir
+notayı silmez; gerçekse doğru konuma gider, sahteyse kısa fazladan nota olarak görünür). Üç varyant ölçüldü (gidilen
+konumun ağdaki olasılığına eşik yok / %10 / %30); `eval_score` gerçek tekrarları sayar (eşleşen), sahteleri saymaz:
+
+| | taban (C) | eşiksiz | %10 | %30 |
+|---|---|---|---|---|
+| gaps_val konum / IOI (yarı otomatik) | 0.570 / 0.732 | 0.569 / 0.734 | 0.569 / 0.735 | 0.569 / 0.734 |
+| gaps_val tap ideal / iyi / kaba konum | 0.801 / 0.740 / 0.696 | 0.802 / 0.742 / 0.697 | 0.802 / 0.742 / 0.698 | 0.802 / 0.742 / 0.698 |
+| gaps_test konum / IOI (rapor) | 0.590 / 0.690 | 0.589 / 0.688 | 0.590 / 0.689 | 0.590 / 0.690 |
+| gaps_test TAB çakışması ses / edisyon | 153 / 164 | **0 / 0** | 56 / 56 | 94 / 99 |
+
+Seçim (kullanıcı): **eşiksiz** — seçim setinde hiçbir ölçüt düşmüyor, çakışma sıfır. Eşik parametreleri seçimden sonra
+koddan çıkarıldı (log'lar `docs/results/gv/*_2d_*.log`).
+
+**Adım 2 sonu (ses modu TAB'da aynı tele iki nota):** gaps_val 465 → 0, gaps_test 641 → 0; edisyon 438 → 0
+(gaps_val edisyonda 1). Nota F1 gaps_test 0.779 → 0.786; ritim konumu 0.593 → 0.589, IOI 0.693 → 0.688 (gaps_test;
+gaps_val'de 0.570 → 0.569, IOI 0.733 → 0.734).
+
 ## Sıradaki (kullanıcı onaylı sıra)
 2 akor tel çakışması + ritim sıkışması → 3 fazladan üst ses notaları kuralı → 4 ses modu tel %56 (önce el pozisyonu
 takibi `w_transition` ölçümü, sonra ayrı bir **hibrit** `--mode`; ses ve edisyon çıktıları birebir aynı kalır)

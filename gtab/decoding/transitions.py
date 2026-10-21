@@ -21,6 +21,8 @@ bölgesi, kutu içinde kalma, uzun boşluk) -- ağırlıklar ise veriden gelir.
 - Retrain GEREKTİRMEZ: akustik model çıktıları emisyon olarak kullanılır.
 """
 
+import itertools
+
 import numpy as np
 from typing import List, Optional, Sequence, Tuple
 
@@ -234,4 +236,38 @@ def decode_lattice(lattice, w_emission=1.0, w_transition=1.0):
         for k, p in zip(range(i, j), path):
             out[k] = cands_list[k][p]
         i = j
+    return out
+
+
+MAX_JOINT = 20000                       # aday kombinasyonu üst sınırı (6 nota x ~5 aday = 15625)
+
+
+def resolve_chord_strings(lattice, picks, groups):
+    """
+    README22 Adım 2B — "ses" modunda akor kısıtı: aynı anda başlayan notalar (groups: nota indeksi listeleri) aynı
+    tele düşemez. Yalnız teli çakışan gruplarda, notalar farklı tellere emisyon log-olasılıkları toplamı en yüksek
+    olacak şekilde ortak seçilir (edisyon modundaki resolve_chords ile aynı fikir, burada tam arama). Çakışmasız
+    gruplar ve çözümsüz gruplar (6'dan çok nota, hiç farklı-tel ataması yok) olduğu gibi kalır.
+    -> picks ile aynı biçimde liste.
+    """
+    cands_list, E_list, _ = lattice
+    out = list(picks)
+    for g in groups:
+        idx = [k for k in g if cands_list[k] and out[k][0] is not None]
+        strings = [out[k][0] for k in idx]
+        if len(set(strings)) == len(strings):
+            continue
+        if np.prod([len(cands_list[k]) for k in idx], dtype=float) > MAX_JOINT:
+            continue
+        best, pick = -np.inf, None
+        for combo in itertools.product(*(range(len(cands_list[k])) for k in idx)):
+            s = [cands_list[k][c][0] for k, c in zip(idx, combo)]
+            if len(set(s)) < len(s):
+                continue
+            sc = sum(E_list[k][c] for k, c in zip(idx, combo))
+            if sc > best:
+                best, pick = sc, combo
+        if pick is not None:
+            for k, c in zip(idx, pick):
+                out[k] = cands_list[k][c]
     return out

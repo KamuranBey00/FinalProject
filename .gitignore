@@ -11,3 +11,6 @@ venv/
 # yeniden üretilir (scripts/data/*). Ham veri + tüm önbellek:
 /data/
 *.zip
+
+# oh-my-claudecode tool state (any folder)
+.omc/

@@ -1,0 +1,27 @@
+gaps_val ses: pieces 15 (with clash 15), notes 15758, clashes 264
+    squeezed >=30ms                 128   48.5%
+    extra_same_pitch >=30ms          86   32.6%
+    extra_other_pitch >=30ms         42   15.9%
+    chord >=30ms                      5    1.9%
+    extra_other_pitch <30ms           3    1.1%
+gaps_val edisyon: pieces 15 (with clash 14), notes 15758, clashes 286
+    squeezed >=30ms                 146   51.0%
+    extra_same_pitch >=30ms          87   30.4%
+    extra_other_pitch >=30ms         45   15.7%
+    extra_other_pitch <30ms           3    1.0%
+    chord <30ms                       3    1.0%
+    chord >=30ms                      2    0.7%
+gaps_test ses: pieces 23 (with clash 23), notes 19569, clashes 377
+    extra_same_pitch >=30ms         149   39.5%
+    squeezed >=30ms                 113   30.0%
+    extra_other_pitch >=30ms         85   22.5%
+    chord >=30ms                     22    5.8%
+    extra_other_pitch <30ms           7    1.9%
+    squeezed <30ms                    1    0.3%
+gaps_test edisyon: pieces 23 (with clash 23), notes 19569, clashes 383
+    extra_same_pitch >=30ms         161   42.0%
+    extra_other_pitch >=30ms        104   27.2%
+    squeezed >=30ms                  98   25.6%
+    chord >=30ms                     11    2.9%
+    extra_other_pitch <30ms           8    2.1%
+    squeezed <30ms                    1    0.3%

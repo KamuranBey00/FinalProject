@@ -270,7 +270,8 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                         min_frames=2, lookahead=2, off_ratio=1.0, refractory=0, fallback=0,
                         peak=False, reattack=0.0, rise=None, rise_keep=0.0, rise_split=0.0,
                         offset_mat=None, offset_threshold=0.0,
-                        peak_pick=False, min_dist=2, prominence=0.1, re_valley=0.0):
+                        peak_pick=False, min_dist=2, prominence=0.1, re_valley=0.0,
+                        reattack_hi=0.0, reattack_rise=0.0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -308,6 +309,10 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
       - re_valley  > 0 (Katman 3.11 Adım 1b, yalnız peak_pick): nota sürerken gelen tepe, önceki tepeyle
                          arasındaki vadi (alçak tepe - vadi dibi) >= re_valley ise yeni nota (yeniden vuruş
                          ve enerji kabul kapılarına VEYA ile eklenir) -> gömülü hızlı tekrarlar.
+      - reattack_hi / reattack_rise > 0 (README22 Adım 2A): yeniden vuruş kapısı (reattack) tek kanıta bakmasın —
+                         tepe >= reattack olan vuruş ayrıca tepe >= reattack_hi YA DA yükseliş >= reattack_rise dB
+                         ister. GAPS'te kapıdan geçen sahte bölünmeler eşiğin hemen üstünde ve enerjisiz (medyan
+                         tepe 0.57, yükseliş 1.9 dB), gerçek tekrarlar değil (0.73, 7.9 dB). 0 = kapalı (birebir).
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -339,9 +344,13 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
         if pkv is not None and (reattack > 0 or keep_r > 0 or use_valley):   # nota sürerken zayıf yeniden vuruşu yok say
             x_ = onset_mat[:, p]
             vdepth = lambda i_: min(x_[st[i_ - 1]], x_[st[i_]]) - float(x_[st[i_ - 1]:st[i_] + 1].min())
+            strong = lambda s_: ((reattack_hi <= 0 and reattack_rise <= 0)
+                                 or (reattack_hi > 0 and pkv[s_] >= reattack_hi)
+                                 or (reattack_rise > 0 and rise is not None
+                                     and float(rise[max(0, s_ - 1):s_ + 3, p].max()) >= reattack_rise))
             st = [s_ for i_, s_ in enumerate(st)
                   if i_ == 0 or s_ == 0 or not cont[s_ - 1, p]
-                  or (reattack > 0 and pkv[s_] >= reattack)
+                  or (reattack > 0 and pkv[s_] >= reattack and strong(s_))
                   or (keep_r > 0 and rmax(s_) >= keep_r)
                   or (use_valley and vdepth(i_) >= re_valley)]
         if refractory > 0 and len(st) > 1:

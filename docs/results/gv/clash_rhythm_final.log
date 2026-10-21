@@ -1,0 +1,5 @@
+gaps_val ses: pieces 15 (with clash 0), notes 15758, clashes 0
+gaps_val edisyon: pieces 15 (with clash 1), notes 15758, clashes 1
+    squeezed >=30ms                   1  100.0%
+gaps_test ses: pieces 23 (with clash 0), notes 19569, clashes 0
+gaps_test edisyon: pieces 23 (with clash 0), notes 19569, clashes 0
