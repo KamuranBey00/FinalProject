@@ -186,6 +186,23 @@ tercihi arasındaki log-olasılık farkı < τ olan notalarda edisyon teli (akor
 - **Karar (kullanıcı):** hibrit mod eklenmedi; ses ve edisyon olduğu gibi. Yazılı tab'a yakın çıktı isteyen edisyon
   modunu kullanır.
 
+## Adım 5 (eğitim öncesi analiz) — kalan hayaletler neler? (22 Ekim 2026) — ürün değişikliği YOK
+`ghost_audit` (nota F1'in etiket ve eşleştirmesi; 3A sonrası). Kalan hayaletlerin dökümü:
+
+| | gaps_val (4683) | gaps_test (4213) | ne demek |
+|---|---|---|---|
+| çalan notanın üst sesi (+12/+19/+24…) | %24.5 | %25.2 | model düzeyi (Adım 3: kuralla ayrılamıyor) |
+| **parça (fragment)**: bulunmuş bir notanın 50–500 ms sonra ikinci kez başlaması | **%33.4** | **%31.2** | sahte yeniden vuruş; 2A kapısından geçenler |
+| açık tel perdesi, o tel etikette sessiz | %10.2 | %10.8 | büyük olasılıkla sempatik titreşim (ses gerçek, çalınmadı) |
+| **kaymış (displaced)**: aynı perdenin etiketi 50–500 ms ötede ve eşleşmemiş | %9.2 | %9.2 | nota gerçek, zaman tutmuyor (model ya da etiket); F1'de iki kez sayılıyor |
+| etiket boşluğu (1 sn içinde hiç etiket yok) | %1.9 | %0.7 | hizalama deliği — küçük |
+| diğer aralıklar | ~%21 | ~%23 | dağınık (oktav içinde her aralık %1–3) |
+
+- Eşleşen notaların onset hatası merkezde (medyan 0 ms, p10/p90 ±23 ms); kaymış notalar ise çift tepeli (±70–116 ms) ve
+  çoğu geç (gaps_test 466 geç / 182 erken).
+- "Hayaletlerin çoğu etiket hatası" hipotezi zayıf: etiket boşluğu %1–2. Etiket kaynaklı olabilecek en çok %9 (kaymış).
+- Dinleme / görsel kontrol için rastgele 30 üst ses dışı hayalet: `docs/results/gv/ghost_sample_gaps_{val,test}.csv`.
+
 ## Sıradaki
 - Adım 5: onset'le başlayan üst ses hayaletleri (gaps_test ~3300) kuralla ayrılamadı → model düzeyinde (tını
   çeşitlendirmeli / vadi hedefli eğitim).

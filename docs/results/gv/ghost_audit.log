@@ -1,0 +1,48 @@
+gaps_val: ghosts 4683
+  overtone                   1147   24.5%
+  near 150-500 ms/fragment    976   20.8%
+  timing <150 ms/fragment     590   12.6%
+  open string                 477   10.2%
+  timing <150 ms/displaced    239    5.1%
+  near 150-500 ms/displaced    192    4.1%
+  interval mod 12 = 5         118    2.5%
+  interval mod 12 = 0         115    2.5%
+  interval mod 12 = 9          96    2.0%
+  interval mod 12 = 4          96    2.0%
+  interval mod 12 = 1          90    1.9%
+  label gap                    89    1.9%
+  interval mod 12 = 7          88    1.9%
+  interval mod 12 = 8          73    1.6%
+  interval mod 12 = 3          72    1.5%
+  interval mod 12 = 10         62    1.3%
+  interval mod 12 = 2          50    1.1%
+  interval mod 12 = 6          45    1.0%
+  no host                      38    0.8%
+  interval mod 12 = 11         30    0.6%
+  onset error ms (detected - label) p10/25/50/75/90: matched [-23.2, 0.0, 0.0, 0.0, 23.2]  timing ghosts [-116.1, -92.9, 69.7, 92.9, 116.1]
+  timing ghosts late / early: 516 / 313
+  sample of 30 non-overtone ghosts -> docs\results\gv\ghost_sample_gaps_val.csv
+gaps_test: ghosts 4213
+  overtone                   1060   25.2%
+  near 150-500 ms/fragment    863   20.5%
+  open string                 454   10.8%
+  timing <150 ms/fragment     450   10.7%
+  timing <150 ms/displaced    198    4.7%
+  near 150-500 ms/displaced    189    4.5%
+  interval mod 12 = 5         133    3.2%
+  interval mod 12 = 4         117    2.8%
+  interval mod 12 = 7         111    2.6%
+  interval mod 12 = 0          96    2.3%
+  interval mod 12 = 8          92    2.2%
+  interval mod 12 = 3          78    1.9%
+  interval mod 12 = 9          74    1.8%
+  interval mod 12 = 10         54    1.3%
+  interval mod 12 = 1          54    1.3%
+  no host                      44    1.0%
+  interval mod 12 = 11         44    1.0%
+  interval mod 12 = 2          43    1.0%
+  interval mod 12 = 6          30    0.7%
+  label gap                    29    0.7%
+  onset error ms (detected - label) p10/25/50/75/90: matched [-23.2, 0.0, 0.0, 0.0, 23.2]  timing ghosts [-116.1, -69.7, 92.9, 116.1, 139.3]
+  timing ghosts late / early: 466 / 182
+  sample of 30 non-overtone ghosts -> docs\results\gv\ghost_sample_gaps_test.csv
