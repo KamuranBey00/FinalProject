@@ -1,0 +1,34 @@
+gaps_val: matched labelled notes 17690
+    share t=0.5 notes handed to edisyon 0.2536
+    share t=1  notes handed to edisyon 0.4374
+    share t=1.5 notes handed to edisyon 0.5647
+    share t=2  notes handed to edisyon 0.6557
+    share t=3  notes handed to edisyon 0.7789
+  ses w=0      string accuracy 0.6283
+  ses w=0.25   string accuracy 0.6158
+  ses w=0.5    string accuracy 0.6081
+  ses w=1      string accuracy 0.5973
+  ses w=2      string accuracy 0.5866
+  edisyon      string accuracy 0.7747
+  hibrit t=0.5 string accuracy 0.6850
+  hibrit t=1   string accuracy 0.7226
+  hibrit t=1.5 string accuracy 0.7445
+  hibrit t=2   string accuracy 0.7591
+  hibrit t=3   string accuracy 0.7724
+gaps_test: matched labelled notes 14401
+    share t=0.5 notes handed to edisyon 0.2591
+    share t=1  notes handed to edisyon 0.4362
+    share t=1.5 notes handed to edisyon 0.5679
+    share t=2  notes handed to edisyon 0.6630
+    share t=3  notes handed to edisyon 0.7813
+  ses w=0      string accuracy 0.6219
+  ses w=0.25   string accuracy 0.6068
+  ses w=0.5    string accuracy 0.5988
+  ses w=1      string accuracy 0.5856
+  ses w=2      string accuracy 0.5693
+  edisyon      string accuracy 0.8112
+  hibrit t=0.5 string accuracy 0.6958
+  hibrit t=1   string accuracy 0.7379
+  hibrit t=1.5 string accuracy 0.7677
+  hibrit t=2   string accuracy 0.7855
+  hibrit t=3   string accuracy 0.8033

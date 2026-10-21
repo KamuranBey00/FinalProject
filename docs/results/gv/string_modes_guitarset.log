@@ -1,0 +1,17 @@
+val: matched labelled notes 2013
+    share t=0.5 notes handed to edisyon 0.2265
+    share t=1  notes handed to edisyon 0.3502
+    share t=1.5 notes handed to edisyon 0.4555
+    share t=2  notes handed to edisyon 0.5509
+    share t=3  notes handed to edisyon 0.7109
+  ses w=0      string accuracy 0.8798
+  ses w=0.25   string accuracy 0.8713
+  ses w=0.5    string accuracy 0.8664
+  ses w=1      string accuracy 0.8535
+  ses w=2      string accuracy 0.8395
+  edisyon      string accuracy 0.4282
+  hibrit t=0.5 string accuracy 0.8008
+  hibrit t=1   string accuracy 0.7481
+  hibrit t=1.5 string accuracy 0.6990
+  hibrit t=2   string accuracy 0.6513
+  hibrit t=3   string accuracy 0.5693

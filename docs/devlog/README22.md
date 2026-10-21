@@ -1,7 +1,8 @@
-# Not — Farklı gitar sesleriyle test: test altyapısı + kusur haritası (Adım 1)
+# Not — Farklı gitar sesleriyle test, kusur haritası ve çözümleme düzeltmeleri (Adım 1–4)
 
-> **Durum (20 Ekim 2026):** yalnız ölçüm, ürün değişikliği yok. Model, çözümleme, checkpoint ve önbellek
-> değişmedi. Dal `Armagan-katman-5.2-ses`. Kod `scripts/eval/gv/`, sonuçlar `docs/results/gv/`, paylaşılabilir ses
+> **Durum (22 Ekim 2026):** Adım 1 ölçüm; **Adım 2–3 çözümlemeyi değiştirdi** (Viterbi kapıları, akor kısıtı, ritim
+> sıkışması; GAPS kalibrasyonu `tabcrnn_deep2.cal.json` → gaps_val alanı), model ağırlıkları ve GuitarSet kuralları
+> değişmedi; Adım 4 ölçüm (hibrit eklenmedi). Dal `Armagan-katman-5.2-ses`. Kod `scripts/eval/gv/`, sonuçlar `docs/results/gv/`, paylaşılabilir ses
 > `eval_data/`, geri kalanı `python -m scripts.data.fetch_gv_data` ile `data/raw/gv/` altına (git'e girmez).
 > GuitarSet = çelik telli akustik, GAPS = naylon klasik; seçim gaps_train'den ayrılan bölümde yapılır,
 > gaps_test yalnız raporlama içindir. Tek seed farkı ±0.01 gürültü sayılır.
@@ -163,7 +164,29 @@ sesinde ve onset tepesi < x (ve yükseliş < y)" her eşikte gerçek notayı da 
 492 gerçek). Kural yazılmadı → model düzeyinde iş (Adım 5, tını / vadi hedefli eğitim). Kalan gaps_test hayaletleri 4213:
 3340 onset'le başlayan, 648 zamanlama hatası.
 
-## Sıradaki (kullanıcı onaylı sıra)
-2 akor tel çakışması + ritim sıkışması → 3 fazladan üst ses notaları kuralı → 4 ses modu tel %56 (önce el pozisyonu
-takibi `w_transition` ölçümü, sonra ayrı bir **hibrit** `--mode`; ses ve edisyon çıktıları birebir aynı kalır)
-→ 5 gerekirse tını çeşitlendirmeli eğitim.
+## Adım 4 — ses modu tel uyumu "%56" (22 Ekim 2026) — ürün değişikliği YOK
+`string_modes`: aynı bulunmuş notalar üzerinde, model çıktısı kayıt başına bir kez. Hibrit = ses modelinin 1. ve 2. tel
+tercihi arasındaki log-olasılık farkı < τ olan notalarda edisyon teli (akorda çakışma kalırsa akorun tamamı edisyon).
+
+| doğru tel oranı | GAPS val (partisyonda **yazılan**) | GAPS test | GuitarSet val (gerçekte **çalınan**, hexaphonic) |
+|---|---|---|---|
+| ses (w_transition 0, ürün) | 0.628 | 0.622 | **0.880** |
+| ses w_transition 0.25 / 1 / 2 | 0.616 / 0.597 / 0.587 | 0.607 / 0.586 / 0.569 | 0.871 / 0.854 / 0.840 |
+| edisyon | **0.775** | **0.811** | 0.428 |
+| hibrit τ 0.5 (notaların ~%25'i edisyona) | 0.685 | 0.696 | 0.801 |
+| hibrit τ 1 / 2 / 3 | 0.723 / 0.759 / 0.772 | 0.738 / 0.786 / 0.803 | 0.748 / 0.651 / 0.569 |
+
+- **El pozisyonu önseli (`w_transition`) iki ölçütte de zarar veriyor** → Katman 3.6'nın 0 seçimi geçerli.
+- **Hibrit hiçbir τ'da edisyonu geçmiyor** (GAPS) ve yazılı tab'a yaklaştıkça gerçekte çalınan teli kaybediyor
+  (GuitarSet). İkisini birlikte iyileştiren τ yok.
+- Yorum: iki mod iki farklı soruya cevap veriyor. classtab / GAPS tel "uyumu" yazılı edisyona benzerliği ölçer
+  (edisyon modelinin eğitim hedefi); ses modunun hedefi çalınan tel. "%56" bir hata değil, ölçütün sorusu.
+- Sınır: GuitarSet akustik modelin alanı (çelik tel, aynı veri setinin başka çalıcıları) → 0.880 klasik gitar için
+  iyimser; klasik gitarda çalınan teli bilen veri yok. Edisyonun 0.428'i kısmen alan farkı (klasik edisyonla eğitildi).
+- **Karar (kullanıcı):** hibrit mod eklenmedi; ses ve edisyon olduğu gibi. Yazılı tab'a yakın çıktı isteyen edisyon
+  modunu kullanır.
+
+## Sıradaki
+- Adım 5: onset'le başlayan üst ses hayaletleri (gaps_test ~3300) kuralla ayrılamadı → model düzeyinde (tını
+  çeşitlendirmeli / vadi hedefli eğitim).
+- Açık: `fetch_gv_data` içinde MDM ve MG kütüphanelerinin kaynak linkleri.
