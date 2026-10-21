@@ -189,4 +189,5 @@ tercihi arasındaki log-olasılık farkı < τ olan notalarda edisyon teli (akor
 ## Sıradaki
 - Adım 5: onset'le başlayan üst ses hayaletleri (gaps_test ~3300) kuralla ayrılamadı → model düzeyinde (tını
   çeşitlendirmeli / vadi hedefli eğitim).
-- Açık: `fetch_gv_data` içinde MDM ve MG kütüphanelerinin kaynak linkleri.
+- ✓ (22 Ekim) `fetch_gv_data` kütüphane listesi: MG Soft Nylon Guitar (Lite), RJS LoFi Nylon ve MDM Classical
+  Guitar v1.01 pianobook paket sayfaları (ücretsiz hesapla indiriliyor), Custom SF2 polyphone.

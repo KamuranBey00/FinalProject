@@ -1,7 +1,7 @@
 """Fetch the guitar-sound test data that the repo may not redistribute (scripts/eval/gv, README22).
 
 classtab.org tablature and YouTube performances are downloaded into data/raw/gv/ (git-ignored); the sample
-libraries need a browser login on their sites, so for those the script only prints where to get them and where to
+libraries need a (free) account on their sites, so for those the script only prints where to get them and where to
 unpack them. Wikimedia Commons recordings (CC BY-SA / public domain) and the Ichiyanagi SoundFont (CC BY-NC 4.0)
 are already in eval_data/ with their licenses.
 
@@ -32,11 +32,12 @@ VIDEOS = [
 ]
 # name, where to get it, what test_b_resynth looks for under data/raw/gv/libraries/
 LIBRARY_CHECKLIST = [
-    ("Soft Nylon Guitar Lite (Mike Georgiades)", "pianobook.co.uk (search the title)",
+    ("MG Soft Nylon Guitar (Lite) (Mike Georgiades)", "https://www.pianobook.co.uk/packs/mg-soft-nylon-guitar-lite/",
      "unpacked folder with MG_NylonGuitar*.wav"),
-    ("RJS LoFi Nylon v1.1 (Risto Sipola)", "https://www.pianobook.co.uk/profile/risto-sipola",
+    ("RJS LoFi Nylon v1.1 (Risto Sipola)", "https://www.pianobook.co.uk/packs/rjs-lofi-nylon/",
      "unpacked folder with Nylon_*.wav"),
-    ("MDM Classical Guitar v1.01 (Mica de Mijatovic y Senic)", "source not recorded (supplied by a team member)",
+    ("MDM Classical Guitar v1.01 (Mica de Mijatovic y Senic)",
+     "https://www.pianobook.co.uk/packs/mdm-classical-guitar-v1-01/",
      "unpacked folder 'MDM Classical Guitar v1.01' incl. its .sfz"),
     ("Custom Classical Guitar", "https://www.polyphone.io/en/soundfonts/guitars/606-custom-classical-guitar",
      "'Custom Classical Guitar.sf2'"),
