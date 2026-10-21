@@ -1,0 +1,20 @@
+gaps_test (30 recordings), selection {'off_ratio': 0.5, 'refractory': 3, 'fallback': 10, 'reattack': 0.5, 'rise_keep': 6.0, 'rise_split': 8.0, 'combine': 'noisyor', 'onset_source': 'pitch', 'reattack_hi': 0.6, 'reattack_rise': 2.0, 'fallback_rise': 4.0}
+detected 24358, ghosts (unmatched) 4213 (17.3%)
+  interval to sounding label note  ghost   real  ghost: with host / in decay
+  other interval                 1921  12532    658 / 1263
+  +12 (2nd partial)               747   1520    432 / 315
+  timing (same pitch <150 ms)     648      0    137 / 511
+  +-1..2 (neighbour pitch)        208    545    111 / 97
+  +19 (3rd)                       203    919     86 / 117
+  -12 (octave below)              192    328    151 / 41
+  no host sounding                184   3487      0 / 184
+  +24 (4th)                        91    619     19 / 72
+  +28 (5th)                        13    132      3 / 10
+  +31 (6th)                         6     63      1 / 5
+  overtone-interval ghost n  1060  onset peak [0.304, 0.502, 0.644]  pitch prob [0.416, 0.529, 0.674]  rise dB [5.89, 10.784, 16.602]  dur s [0.209, 0.302, 0.511]
+  overtone-interval real  n  3253  onset peak [0.561, 0.747, 0.879]  pitch prob [0.622, 0.752, 0.859]  rise dB [10.328, 15.661, 21.759]  dur s [0.232, 0.325, 0.534]
+  origin: onset-started ghost/real (3340, 19402), fallback (no onset) ghost/real (873, 743)
+  rule 'drop fallback notes on an overtone of a detected sounding note' removes ghost/real (221, 103)
+  fallback ghost n   873  pitch prob p10/25/50/75 [0.342, 0.398, 0.475, 0.585]  dur s [0.255, 0.279, 0.395, 0.627]  rise dB [4.574, 5.604, 8.349, 13.292]
+  fallback real  n   743  pitch prob p10/25/50/75 [0.394, 0.483, 0.596, 0.709]  dur s [0.255, 0.325, 0.488, 0.755]  rise dB [6.21, 9.013, 13.76, 19.012]
+  same rule for onset-started notes would remove ghost/real (724, 2599)

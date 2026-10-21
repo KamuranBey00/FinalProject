@@ -1,0 +1,10 @@
+gaps_val current selection: score 0.7376 (saved 0.7376)
+  current                mix 0.7376  note P 0.7888 R 0.7859 F1 0.7873  frame F1 0.6878  fast-repeat miss 0.470 (n 1667)
+  fallback_rise 2        mix 0.7421  note P 0.8155 R 0.7847 F1 0.7998  frame F1 0.6843  fast-repeat miss 0.470 (n 1667)
+  fallback_rise 3        mix 0.7435  note P 0.8219 R 0.7840 F1 0.8025  frame F1 0.6844  fast-repeat miss 0.470 (n 1667)
+  fallback_rise 4        mix 0.7443  note P 0.8265 R 0.7829 F1 0.8041  frame F1 0.6845  fast-repeat miss 0.471 (n 1667)
+  fallback_rise 6        mix 0.7443  note P 0.8324 R 0.7800 F1 0.8053  frame F1 0.6832  fast-repeat miss 0.473 (n 1667)
+selected on gaps_val: fallback_rise 4 (score 0.7443)
+gaps_test (report only):
+  current                mix 0.7434  note P 0.7616 R 0.8125 F1 0.7862  frame F1 0.7006  fast-repeat miss 0.478 (n 372)
+  fallback_rise 4        mix 0.7557  note P 0.8270 R 0.8094 F1 0.8181  frame F1 0.6932  fast-repeat miss 0.484 (n 372)

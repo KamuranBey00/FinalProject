@@ -1,0 +1,10 @@
+gaps_val: fallback notes ghost 2043 / real 798; removed ghost / real by rule:
+  rise < 2 dB: (940, 34)   rise < 2 dB OR overtone of a sounding note: (1230, 152)
+  rise < 3 dB: (1158, 55)   rise < 3 dB OR overtone of a sounding note: (1398, 172)
+  rise < 4 dB: (1314, 85)   rise < 4 dB OR overtone of a sounding note: (1513, 195)
+  rise < 6 dB: (1522, 170)   rise < 6 dB OR overtone of a sounding note: (1678, 261)
+gaps_test: fallback notes ghost 2991 / real 821; removed ghost / real by rule:
+  rise < 2 dB: (1611, 29)   rise < 2 dB OR overtone of a sounding note: (1944, 141)
+  rise < 3 dB: (1903, 59)   rise < 3 dB OR overtone of a sounding note: (2172, 164)
+  rise < 4 dB: (2118, 78)   rise < 4 dB OR overtone of a sounding note: (2339, 181)
+  rise < 6 dB: (2380, 145)   rise < 6 dB OR overtone of a sounding note: (2554, 236)

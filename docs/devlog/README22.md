@@ -135,6 +135,34 @@ koddan çıkarıldı (log'lar `docs/results/gv/*_2d_*.log`).
 (gaps_val edisyonda 1). Nota F1 gaps_test 0.779 → 0.786; ritim konumu 0.593 → 0.589, IOI 0.693 → 0.688 (gaps_test;
 gaps_val'de 0.570 → 0.569, IOI 0.733 → 0.734).
 
+## Adım 3 — fazladan notalar (22 Ekim 2026)
+**Teşhis** (`extra_notes`; nota F1'in etiketleri ve eşleştirmesi, gaps_val 28 / gaps_test 30 kayıt). Bulunan notaların
+%21–24'ü etiketle eşleşmiyor. Kaynağa göre (gaps_test, 2A–2D sonrası): onset'le başlayan notalarda hayalet %15
+(3340 / 19402), **`fallback` (onset'siz) notalarda %78 (2991 / 821)** — hayaletlerin yarısı bu kuraldan. Aralığa göre
+en büyük grup çalan bir notanın +12'si (1054), +19 (296), +24 (127); 795'i aslında zamanlama hatası (aynı perde etiket
+50–150 ms uzakta). Oktav hatası ayrı bir sorun değil, aynı ailenin parçası.
+
+**A. Onset'siz notaya enerji şartı** (`viterbi.segment_notes_onset` `fallback_rise`; 0 = kapalı). fallback hayaletlerinin
+enerji yükselişi medyan 2.3 dB (sönen notanın üst sesi), kurtarılan gerçek notaların %90'ı ≥ 3.9 dB. Sayım (gaps_val):
+≥ 2 dB 940 hayalet / 34 gerçek siler, ≥ 4 dB 1314 / 85; "üst ses" koşulu eklemek oranı bozuyor (8'e 1) → alınmadı.
+Seçim gaps_val'de `mix` ile (`calibrate_reattack --grid fallback`): **4 dB** (mix 0.7376 → 0.7443; 6 dB eşit skor, daha
+çok kayıp). Hızlı tekrar kaçma 0.470 → 0.471.
+
+| | gaps_val | gaps_test (rapor) |
+|---|---|---|
+| nota F1 (P / R) | 0.787 (0.789 / 0.786) → 0.804 (0.827 / 0.783) | 0.786 (0.762 / 0.813) → **0.818** (0.827 / 0.809) |
+| kare F1 | 0.688 → 0.685 | 0.701 → 0.693 |
+| hayalet nota | — | 6331 → 4213 (fallback kaynaklı 2991 → 873) |
+| ritim konum / IOI (yarı otomatik) | 0.569 / 0.734 → 0.568 / 0.730 | 0.589 / 0.688 → 0.590 / 0.686 |
+| tap kaba konum / IOI | 0.697 / 0.745 → 0.701 / 0.751 | 0.802 / 0.821 → 0.805 / 0.828 |
+| ses tel doğruluğu | 0.628 → 0.628 | 0.622 → 0.622 |
+| TAB aynı tel çakışması (ses) | 0 → 0 | 0 → 1 |
+
+**Onset'le başlayan üst ses hayaletleri kuralla ayrılamıyor** (`overtone_gate_counts.log`): "bulunmuş bir notanın üst
+sesinde ve onset tepesi < x (ve yükseliş < y)" her eşikte gerçek notayı da aynı oranda siler (tepe < 0.5: 318 hayalet /
+492 gerçek). Kural yazılmadı → model düzeyinde iş (Adım 5, tını / vadi hedefli eğitim). Kalan gaps_test hayaletleri 4213:
+3340 onset'le başlayan, 648 zamanlama hatası.
+
 ## Sıradaki (kullanıcı onaylı sıra)
 2 akor tel çakışması + ritim sıkışması → 3 fazladan üst ses notaları kuralı → 4 ses modu tel %56 (önce el pozisyonu
 takibi `w_transition` ölçümü, sonra ayrı bir **hibrit** `--mode`; ses ve edisyon çıktıları birebir aynı kalır)

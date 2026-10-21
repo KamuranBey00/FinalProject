@@ -1,0 +1,27 @@
+====================================================================================================
+A) GIDIS-DONUS — partisyon -> MusicXML yazici -> GAPS okuyucusu (tek olcu imli, anakruzsuz partisyonlar)
+====================================================================================================
+  202 partisyon | 159796 nota | birebir 1.0000 | olcu dolulugu bozuk 0/14398 | 1/24 vurus izgarasi disi (yazilmadi) 903
+
+====================================================================================================
+B) UCTAN UCA (yari otomatik: gercek medyan tempo x (1 +- 0.1) + en sik olcu imi; ses modu; deep2 + 1q + BeatNet/DBN)
+====================================================================================================
+            kayit     konum  tek imli  faz duz.   kaymis       n     IOI  olcu basi F   geri okuma olcu tek tip
+  gaps_val    15     0.568     0.561     0.576    1/9      5966   0.730        0.558        1.000        1.000
+  gaps_test   23     0.590     0.608     0.614    3/17     8328   0.686        0.582        1.000        1.000
+
+====================================================================================================
+C) TAP MODU (simulasyon) — kullanici ilk olcu basindan her vurusa dokunur; olcu basi = ilk dokunus
+   kosul: (sapma sigma, sabit gecikme, kacan, fazla dokunus)
+====================================================================================================
+            kosul                               vurus F   konum  tek imli     IOI  olcu basi F
+  gaps_val  yari otomatik (BPM %10 + olcu)        0.690   0.568     0.561   0.730        0.558
+  gaps_val  ideal (0 ms, +0 ms, %0, %0)           0.991   0.803     0.877   0.886        0.846
+  gaps_val  iyi (20 ms, +50 ms, %5, %2)           0.972   0.744     0.821   0.834        0.796
+  gaps_val  kaba (40 ms, +80 ms, %5, %2)          0.885   0.701     0.752   0.751        0.720
+  gaps_test yari otomatik (BPM %10 + olcu)        0.632   0.590     0.608   0.686        0.582
+  gaps_test ideal (0 ms, +0 ms, %0, %0)           0.996   0.921     0.921   0.924        0.950
+  gaps_test iyi (20 ms, +50 ms, %5, %2)           0.976   0.864     0.861   0.881        0.889
+  gaps_test kaba (40 ms, +80 ms, %5, %2)          0.875   0.805     0.815   0.828        0.785
+
+Karar kurali: docs/devlog/README16.md.

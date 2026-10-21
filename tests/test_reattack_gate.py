@@ -52,5 +52,25 @@ class TestReattackGate(unittest.TestCase):
         self.assertEqual(n_notes(reattack_hi=0.5, reattack_rise=3.0), 2)
 
 
+class TestFallbackRise(unittest.TestCase):
+    # Adım 3A: onset'siz (fallback) nota ancak başında enerji yükseldiyse kabul
+    def fallback_notes(self, rise_at_start: float, **gate) -> int:
+        pitch = np.zeros((T, 1), np.float32)
+        pitch[10:30] = 0.9                                         # 20 kare aktif, hiç onset yok
+        rise = np.zeros((T, 1), np.float32)
+        rise[10] = rise_at_start
+        return len(segment_notes_onset(pitch, np.zeros((T, 1), np.float32), 40, threshold=0.5,
+                                       onset_threshold=0.4, fallback=10, rise=rise, **gate))
+
+    def test_kapali_iken_bugunku_davranis(self):
+        self.assertEqual(self.fallback_notes(0.0), 1)
+
+    def test_enerjisiz_onsetsiz_nota_atilir(self):
+        self.assertEqual(self.fallback_notes(1.0, fallback_rise=2.0), 0)
+
+    def test_enerjili_onsetsiz_nota_kalir(self):
+        self.assertEqual(self.fallback_notes(5.0, fallback_rise=2.0), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

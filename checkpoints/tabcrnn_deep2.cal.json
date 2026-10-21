@@ -1,6 +1,6 @@
 {
   "gaps_val": [
-    0.7375779818009283,
+    0.7443286390717151,
     0.4,
     0.4,
     {
@@ -13,7 +13,8 @@
       "combine": "noisyor",
       "onset_source": "pitch",
       "reattack_hi": 0.6,
-      "reattack_rise": 2.0
+      "reattack_rise": 2.0,
+      "fallback_rise": 4.0
     }
   ],
   "val": [

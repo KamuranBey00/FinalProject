@@ -271,7 +271,7 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                         peak=False, reattack=0.0, rise=None, rise_keep=0.0, rise_split=0.0,
                         offset_mat=None, offset_threshold=0.0,
                         peak_pick=False, min_dist=2, prominence=0.1, re_valley=0.0,
-                        reattack_hi=0.0, reattack_rise=0.0):
+                        reattack_hi=0.0, reattack_rise=0.0, fallback_rise=0.0):
     """
     Onsets & Frames kuralı:
       - Bir nota YALNIZCA onset ile başlar (onset_mat > onset_threshold, yükselen kenar).
@@ -313,6 +313,9 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                          tepe >= reattack olan vuruş ayrıca tepe >= reattack_hi YA DA yükseliş >= reattack_rise dB
                          ister. GAPS'te kapıdan geçen sahte bölünmeler eşiğin hemen üstünde ve enerjisiz (medyan
                          tepe 0.57, yükseliş 1.9 dB), gerçek tekrarlar değil (0.73, 7.9 dB). 0 = kapalı (birebir).
+      - fallback_rise > 0 (README22 Adım 3A): onset'siz (fallback) nota ancak başında yükseliş >= fallback_rise dB
+                         ise kabul. GAPS'te fallback notalarının %72'si sahte (çoğu sönen notanın üst sesi; enerji
+                         sıçraması yok, medyan 2.3 dB); kurtardığı gerçek notaların %90'ı >= 3.9 dB. 0 = kapalı.
     -> [(start, end, pitch)] zaman sırasına göre (segment_notes ile aynı biçim).
     """
     active = pitch_mat > threshold
@@ -396,7 +399,9 @@ def segment_notes_onset(pitch_mat, onset_mat, pitch_lo, threshold=0.5, onset_thr
                     s_ = t
                     while t < T and cont[t, p] and not covered[t]:
                         t += 1
-                    if t - s_ >= fallback:
+                    rose = (fallback_rise <= 0 or rise is not None
+                            and float(rise[max(0, s_ - 1):s_ + 3, p].max()) >= fallback_rise)
+                    if t - s_ >= fallback and rose:
                         notes.append((int(s_), int(t), pitch_lo + p))
                 else:
                     t += 1
