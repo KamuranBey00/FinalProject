@@ -1,0 +1,14 @@
+== gaps_val (decoding: own calibration)
+  tabcrnn_deep2.pt       mix 0.7443  note P 0.8265 R 0.7829 F1 0.8041  frame F1 0.6845  fast-repeat miss 0.471 (n 1667)
+    ghosts 4683: overtone 1147, fragment 1566, open string 477, displaced 431, other 1062
+  tabcrnn_g10e10.pt      mix 0.7380  note P 0.7666 R 0.8057 F1 0.7857  frame F1 0.6903  fast-repeat miss 0.525 (n 1667)
+    ghosts 6991: overtone 1467, fragment 2981, open string 579, displaced 621, other 1343
+  tabcrnn_g1e13.pt       mix 0.7512  note P 0.8417 R 0.7858 F1 0.8128  frame F1 0.6896  fast-repeat miss 0.496 (n 1667)
+    ghosts 4211: overtone 1093, fragment 1317, open string 449, displaced 395, other 957
+== gaps_test (decoding: own calibration)
+  tabcrnn_deep2.pt       mix 0.7557  note P 0.8270 R 0.8094 F1 0.8181  frame F1 0.6932  fast-repeat miss 0.484 (n 372)
+    ghosts 4213: overtone 1060, fragment 1313, open string 454, displaced 387, other 999
+  tabcrnn_g10e10.pt      mix 0.7471  note P 0.7657 R 0.8312 F1 0.7971  frame F1 0.6972  fast-repeat miss 0.478 (n 372)
+    ghosts 6329: overtone 1314, fragment 2656, open string 539, displaced 438, other 1382
+  tabcrnn_g1e13.pt       mix 0.7643  note P 0.8447 R 0.8137 F1 0.8289  frame F1 0.6997  fast-repeat miss 0.503 (n 372)
+    ghosts 3723: overtone 1040, fragment 1086, open string 417, displaced 321, other 859

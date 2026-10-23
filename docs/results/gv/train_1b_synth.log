@@ -1,0 +1,27 @@
+Katman 3.10 Adim 2 secenekleri: onset_soft=0.3 | GuitarSet perde kaybi agirligi=1.0 | kisa nota: <5 kare x2.0
+Katman 3.10 Adim 3c: tekrar onset agirligi x3.0 (onceki nota <= 3 kare once) | GAPS perde agirligi 2.0 | offset kafasi agirligi 1.0
+Katman 3.11 Adim 4: vadi agirligi x5.0 | fragman agirligi x3.0 | hizli tekrar parcasi ornekleme x3.0
+  fragman taramasi: tabcrnn_deep2.pt egitim verisinde (bir kez)
+Katman 6 Adim 2: bozulmus kopya olasiligi 0.5 (data/cache/synth) | GuitarSet kopyali parca 0/2110
+  ornekleme: 934/2110 parca hizli tekrar iceriyor (x3.0)
+  ornekleme: 1542/8785 parca hizli tekrar iceriyor (x3.0)
+perde: 203 train / 28 val kaydi (icraciya gore ayrik)
+model: TabCRNNOnset | harmonikler: (0.5, 1, 2, 3, 4, 5) | Katman 3.12: artik blok 2 | perde-onset kafasi True (kayip x1.0) | yeni katman lr x3.0
+baslangic: tabcrnn_deep2.pt
+ep  0 |  | GS-tabF1 0.716 GS-onsetF1 0.642@0.5 GS-perdeOnsetF1(kafa) 0.689@0.5 GAPS-kareF1 0.661 GAPS-onsetF1(tel) 0.484@0.4 GAPS-onsetF1(kafa) 0.524@0.5 GAPS-onsetF1(bozuk) 0.524
+ep  1 | tab 0.069 on 0.223 off 0.194 gsperde 0.028 perde 0.057 ponset 0.012 poffset 0.013 pon 0.032 gpon 0.024 | GS-tabF1 0.713 GS-onsetF1 0.640@0.5 GS-perdeOnsetF1(kafa) 0.688@0.5 GAPS-kareF1 0.663 GAPS-onsetF1(tel) 0.514@0.3 GAPS-onsetF1(kafa) 0.549@0.5 GAPS-onsetF1(bozuk) 0.549
+ep  2 | tab 0.070 on 0.217 off 0.190 gsperde 0.028 perde 0.056 ponset 0.011 poffset 0.013 pon 0.031 gpon 0.022 | GS-tabF1 0.716 GS-onsetF1 0.638@0.5 GS-perdeOnsetF1(kafa) 0.698@0.5 GAPS-kareF1 0.666 GAPS-onsetF1(tel) 0.519@0.3 GAPS-onsetF1(kafa) 0.554@0.5 GAPS-onsetF1(bozuk) 0.554
+ep  3 | tab 0.070 on 0.219 off 0.192 gsperde 0.027 perde 0.054 ponset 0.011 poffset 0.012 pon 0.031 gpon 0.022 | GS-tabF1 0.719 GS-onsetF1 0.649@0.5 GS-perdeOnsetF1(kafa) 0.717@0.5 GAPS-kareF1 0.669 GAPS-onsetF1(tel) 0.535@0.3 GAPS-onsetF1(kafa) 0.562@0.5 GAPS-onsetF1(bozuk) 0.562
+ep  4 | tab 0.069 on 0.214 off 0.189 gsperde 0.027 perde 0.055 ponset 0.011 poffset 0.012 pon 0.030 gpon 0.022 | GS-tabF1 0.721 GS-onsetF1 0.641@0.5 GS-perdeOnsetF1(kafa) 0.701@0.5 GAPS-kareF1 0.667 GAPS-onsetF1(tel) 0.517@0.4 GAPS-onsetF1(kafa) 0.542@0.5 GAPS-onsetF1(bozuk) 0.542
+ep  5 | tab 0.065 on 0.216 off 0.189 gsperde 0.027 perde 0.056 ponset 0.012 poffset 0.013 pon 0.031 gpon 0.023 | GS-tabF1 0.721 GS-onsetF1 0.641@0.5 GS-perdeOnsetF1(kafa) 0.694@0.5 GAPS-kareF1 0.667 GAPS-onsetF1(tel) 0.511@0.4 GAPS-onsetF1(kafa) 0.538@0.5 GAPS-onsetF1(bozuk) 0.538
+ep  6 | tab 0.067 on 0.214 off 0.188 gsperde 0.027 perde 0.053 ponset 0.011 poffset 0.013 pon 0.030 gpon 0.022 | GS-tabF1 0.720 GS-onsetF1 0.627@0.5 GS-perdeOnsetF1(kafa) 0.704@0.5 GAPS-kareF1 0.669 GAPS-onsetF1(tel) 0.541@0.4 GAPS-onsetF1(kafa) 0.566@0.5 GAPS-onsetF1(bozuk) 0.566
+ep  7 | tab 0.069 on 0.203 off 0.183 gsperde 0.026 perde 0.052 ponset 0.011 poffset 0.012 pon 0.029 gpon 0.021 | GS-tabF1 0.714 GS-onsetF1 0.638@0.5 GS-perdeOnsetF1(kafa) 0.701@0.5 GAPS-kareF1 0.670 GAPS-onsetF1(tel) 0.507@0.4 GAPS-onsetF1(kafa) 0.541@0.5 GAPS-onsetF1(bozuk) 0.541
+ep  8 | tab 0.066 on 0.215 off 0.188 gsperde 0.027 perde 0.052 ponset 0.011 poffset 0.012 pon 0.030 gpon 0.022 | GS-tabF1 0.719 GS-onsetF1 0.633@0.5 GS-perdeOnsetF1(kafa) 0.695@0.5 GAPS-kareF1 0.671 GAPS-onsetF1(tel) 0.529@0.4 GAPS-onsetF1(kafa) 0.557@0.5 GAPS-onsetF1(bozuk) 0.557
+ep  9 | tab 0.069 on 0.210 off 0.187 gsperde 0.027 perde 0.053 ponset 0.011 poffset 0.012 pon 0.030 gpon 0.022 | GS-tabF1 0.716 GS-onsetF1 0.633@0.5 GS-perdeOnsetF1(kafa) 0.702@0.5 GAPS-kareF1 0.672 GAPS-onsetF1(tel) 0.533@0.4 GAPS-onsetF1(kafa) 0.557@0.5 GAPS-onsetF1(bozuk) 0.557
+ep 10 | tab 0.066 on 0.217 off 0.191 gsperde 0.027 perde 0.052 ponset 0.011 poffset 0.012 pon 0.031 gpon 0.021 | GS-tabF1 0.717 GS-onsetF1 0.639@0.5 GS-perdeOnsetF1(kafa) 0.706@0.5 GAPS-kareF1 0.671 GAPS-onsetF1(tel) 0.515@0.4 GAPS-onsetF1(kafa) 0.544@0.5 GAPS-onsetF1(bozuk) 0.544
+ep 11 | tab 0.066 on 0.214 off 0.186 gsperde 0.026 perde 0.052 ponset 0.011 poffset 0.013 pon 0.030 gpon 0.022 | GS-tabF1 0.718 GS-onsetF1 0.638@0.5 GS-perdeOnsetF1(kafa) 0.708@0.5 GAPS-kareF1 0.671 GAPS-onsetF1(tel) 0.527@0.4 GAPS-onsetF1(kafa) 0.555@0.5 GAPS-onsetF1(bozuk) 0.555
+ep 12 | tab 0.064 on 0.205 off 0.183 gsperde 0.026 perde 0.051 ponset 0.010 poffset 0.012 pon 0.029 gpon 0.020 | GS-tabF1 0.716 GS-onsetF1 0.634@0.5 GS-perdeOnsetF1(kafa) 0.701@0.5 GAPS-kareF1 0.672 GAPS-onsetF1(tel) 0.530@0.4 GAPS-onsetF1(kafa) 0.554@0.5 GAPS-onsetF1(bozuk) 0.554
+ep 13 | tab 0.066 on 0.214 off 0.189 gsperde 0.026 perde 0.051 ponset 0.011 poffset 0.012 pon 0.030 gpon 0.022 | GS-tabF1 0.720 GS-onsetF1 0.639@0.5 GS-perdeOnsetF1(kafa) 0.701@0.5 GAPS-kareF1 0.671 GAPS-onsetF1(tel) 0.526@0.4 GAPS-onsetF1(kafa) 0.551@0.5 GAPS-onsetF1(bozuk) 0.551
+ep 14 | tab 0.068 on 0.218 off 0.191 gsperde 0.027 perde 0.052 ponset 0.011 poffset 0.012 pon 0.031 gpon 0.021 | GS-tabF1 0.719 GS-onsetF1 0.641@0.5 GS-perdeOnsetF1(kafa) 0.704@0.5 GAPS-kareF1 0.670 GAPS-onsetF1(tel) 0.512@0.4 GAPS-onsetF1(kafa) 0.541@0.5 GAPS-onsetF1(bozuk) 0.541
+ep 15 | tab 0.065 on 0.212 off 0.188 gsperde 0.027 perde 0.051 ponset 0.011 poffset 0.012 pon 0.030 gpon 0.021 | GS-tabF1 0.720 GS-onsetF1 0.639@0.5 GS-perdeOnsetF1(kafa) 0.703@0.5 GAPS-kareF1 0.671 GAPS-onsetF1(tel) 0.527@0.4 GAPS-onsetF1(kafa) 0.553@0.5 GAPS-onsetF1(bozuk) 0.553
+En iyi secim skoru: 0.632 -> C:\Users\HP\Desktop\Projects\Graduation Project\FinalProject\checkpoints\tabcrnn_s1b_l.pt | dogrulamada secilen onset esigi: 0.3

@@ -325,14 +325,16 @@ class PitchSeq(Dataset):
 
     def __init__(self, files, chunk=200, onsets=False, dilate=2, onset_soft=None,
                  repeat_weight=1.0, repeat_gap=3, valley_weight=1.0, frag_weight=1.0, frag_fn=None, tab_dir=None,
-                 alt_root=None, alt_p=0.0, alt_fixed=None):
+                 alt_root=None, alt_p=0.0, alt_fixed=None, ghost_weight=1.0, ghost_fn=None):
         """onsets: True ise perde onset roll'u ve onset kaybı ağırlığı da verilir ->
         (x, frame, onset (L,P), onset ağırlığı (L,P), L). repeat_weight: Adım 3c tekrar ağırlığı.
         valley_weight / frag_weight / frag_fn(path, cqt, frame, onset) / self.fast: Katman 3.11 Adım 4
         (GuitarSetSeq ile aynı).
         tab_dir (Katman 3.13): partisyon TAB etiketleri (build_gaps_tab) -> çıktıya (L, S) tel sınıfı eklenir;
         bilinmeyen kareler ve etiketi olmayan kayıtlar PAD (kayıpta yok sayılır).
-        alt_root / alt_p / alt_fixed (Katman 6 Adım 2): bozulmuş CQT kopyaları, GuitarSetSeq ile aynı."""
+        alt_root / alt_p / alt_fixed (Katman 6 Adım 2): bozulmuş CQT kopyaları, GuitarSetSeq ile aynı.
+        ghost_weight / ghost_fn(path, frame, onset) -> (T, P) bool (README22 Aşama 1a): hayalet başlangıçlarına
+        'vuruş yok' ağırlığı; 1 = kapalı (eski eğitim birebir)."""
         from gtab.data.tab_labels import repeat_onset_weights, valley_frames
         self.tab_dir = tab_dir
         self.tabs = []
@@ -351,13 +353,18 @@ class PitchSeq(Dataset):
                       if onsets and repeat_weight != 1.0 else None)
             if onsets:
                 valley, fast_on = valley_frames(fr, on_all, repeat_gap)
-                if valley_weight != 1.0 or (frag_fn is not None and frag_weight != 1.0):
+                use_ghost = ghost_fn is not None and ghost_weight != 1.0
+                if valley_weight != 1.0 or (frag_fn is not None and frag_weight != 1.0) or use_ghost:
                     ow_all = np.ones(fr.shape, np.float32) if ow_all is None else ow_all
                 if valley_weight != 1.0:
                     ow_all = np.where(valley, np.maximum(ow_all, valley_weight), ow_all)
                 if frag_fn is not None and frag_weight != 1.0:
                     fm = frag_fn(path, cqt, fr, on_all)
                     ow_all = np.where(fm, np.maximum(ow_all, frag_weight), ow_all)
+                if use_ghost:
+                    gm = ghost_fn(path, fr, on_all)
+                    ow_all = np.where(gm, np.maximum(ow_all, ghost_weight), ow_all)
+                    self.n_ghost = getattr(self, "n_ghost", 0) + int(gm.sum())
             if onsets and onset_soft is not None:     # Katman 3.10: keskin hedef (tepe 1, sonraki kare soft)
                 o1 = on_all.astype(np.float32); nx = np.zeros_like(o1); nx[1:] = o1[:-1] * float(onset_soft)
                 on_all = np.maximum(o1, nx) * fr

@@ -1,0 +1,10 @@
+== gaps_val (decoding: active gaps_val selection)
+  tabcrnn_deep2.pt       mix 0.7443  note P 0.8265 R 0.7829 F1 0.8041  frame F1 0.6845  fast-repeat miss 0.471 (n 1667)
+    ghosts 4683: overtone 1147, fragment 1566, open string 477, displaced 431, other 1062
+  tabcrnn_g1e13.pt       mix 0.7507  note P 0.8260 R 0.7952 F1 0.8103  frame F1 0.6910  fast-repeat miss 0.467 (n 1667)
+    ghosts 4774: overtone 1205, fragment 1586, open string 502, displaced 425, other 1056
+== gaps_test (decoding: active gaps_val selection)
+  tabcrnn_deep2.pt       mix 0.7557  note P 0.8270 R 0.8094 F1 0.8181  frame F1 0.6932  fast-repeat miss 0.484 (n 372)
+    ghosts 4213: overtone 1060, fragment 1313, open string 454, displaced 387, other 999
+  tabcrnn_g1e13.pt       mix 0.7628  note P 0.8276 R 0.8208 F1 0.8242  frame F1 0.7013  fast-repeat miss 0.481 (n 372)
+    ghosts 4254: overtone 1142, fragment 1272, open string 482, displaced 365, other 993

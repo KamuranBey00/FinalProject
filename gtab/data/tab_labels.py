@@ -198,3 +198,39 @@ def fragment_frames(curve, lab, on_mask, thr=0.1, prominence=0.1, tol=2):
             if lab[t, k] > 0 and not near[t, k]:
                 out[max(0, t - 1):t + 2, k] = True
     return out & ~near & (lab > 0)
+
+
+GHOST_OVERTONES = (12, 19, 24, 28, 31)          # +oktav, +oktav+beşli, +2 oktav, ... (gitar telinin kısmi sesleri)
+
+
+def ghost_frames(est, frame, onset, pitch_lo, frag_frames=round(0.5 * FRAME_RATE), tol=2):
+    """
+    README22 Aşama 1a — HAYALET negatifleri: modelin (bugünkü çözümlemeyle) bulduğu, etiketle eşleşmeyen notaların
+    başlangıç kareleri (±1), yalnız iki türde (README22 Adım 5 ghost_audit):
+      üst ses : o anda çalan bir etiket notasının +12/+19/+24/+28/+31'i
+      parça   : aynı perdede, frag_frames içinde başlayan ve BAŞKA bir tespitle eşleşmiş bir etiket notası var
+    est [(başlangıç, bitiş, perde)] kare; frame / onset (T, P) etiket roll'ları. -> (T, P) bool.
+    fragment_frames'ten farkı: etiketsiz perdeler (üst ses) ve etiket notası bittikten sonraki parçalar da kapsanır.
+    Aynı perdede etiket onset'inin ±tol karesi hiçbir zaman negatif yapılmaz.
+    """
+    import mir_eval
+    from gtab.evaluation.pitch_eval import roll_to_notes, to_mir
+    frame, on = np.asarray(frame) > 0, np.asarray(onset) > 0
+    T, P = frame.shape
+    ref = roll_to_notes(frame, on, pitch_lo)
+    out = np.zeros((T, P), bool)
+    if not ref or not est:
+        return out
+    pairs = mir_eval.transcription.match_notes(*to_mir(ref), *to_mir(est), onset_tolerance=0.05, offset_ratio=None)
+    found, matched_ref = {j for _, j in pairs}, {i for i, _ in pairs}
+    for j, (a, _, p) in enumerate(est):
+        if j in found or not 0 <= p - pitch_lo < P:
+            continue
+        overtone = any(ra <= a < rb and p - rp in GHOST_OVERTONES for ra, rb, rp in ref)
+        piece = any(rp == p and i in matched_ref and abs(ra - a) <= frag_frames for i, (ra, _, rp) in enumerate(ref))
+        if overtone or piece:
+            out[max(0, a - 1):a + 2, p - pitch_lo] = True
+    near = on.copy()
+    for d in range(1, tol + 1):
+        near[d:] |= on[:-d]; near[:-d] |= on[d:]
+    return out & ~near

@@ -211,8 +211,62 @@ teller çok çalınıyor); tetikleyicili 513 / 1069, tetikleyicisiz 1224 / 5794.
 kuralı en temkinlide 32 sahte / 7 gerçek siler (tüm sahtelerin %0.7'si, nota F1 ≈ +0.001), gevşedikçe 303 / 251'e varır;
 gaps_test aynı (37 / 5 … 268 / 200). Güvenilir bir kural yok → ikinci aşamaya (eğitim).
 
+## İkinci aşama — eğitim (22–23 Ekim 2026)
+Kullanıcının sırası: 1 sahte notalar (1a hayalet negatifli eğitim → yetmezse 1b tını çeşitlendirme), 2 açık tel,
+3 vuruş ağı; sonunda kendi kayıtlarımızla dış test. Ortak kurulum: deep2'den devam (lr 1e-4, Katman 3.12 bayrakları),
+15 epoch, `--save-epochs`; aynı ayarlarla **cezasız kontrol** eğitimi. `train_onset`'in kendi seçim ölçütü hayaletleri
+görmediği için epoch seçimi `compare_ckpts` ile (ürün çözümlemesiyle, gaps_val, kural: mix en yüksek ve hızlı tekrar
+kaçma ≤ ürün + 0.01). Kalibrasyon (`eval_pitch`) model başına ~2.5 saat (CPU) → yalnız umut veren model için.
+
+### Aşama 1a — hayalet negatifleri (`--ghost-weight`): YETMEDİ
+`tab_labels.ghost_frames`: init modelin bugünkü çözümlemeyle `gaps_fit`'te ürettiği hayaletler (üst ses + parça;
+`fragment_frames` yalnız etiketli perdedeki bölünmeleri kapsıyordu ve tel-onset eğrisine bakıyordu) onset kaybında
+ağırlıklı negatif. Kısa deneme: x3 etkisiz, x10 sinyal. 15 epoch (`compare_1a_long.log`, aynı çözümleme, gaps_val):
+
+| | nota F1 | sahte | üst ses | parça | hızlı tekrar kaçma |
+|---|---|---|---|---|---|
+| ürün (deep2) | 0.804 | 4683 | 1147 | 1566 | 0.471 |
+| kontrol ep13 | 0.810 | 4774 | 1205 | 1586 | 0.467 |
+| x10 ep10 | 0.816 | 4050 | 966 | 1195 | 0.491 |
+
+Kendi kalibrasyonuyla (`compare_1a_owncal.log`): x10'un kalibrasyonu bambaşka kurallar seçti (fallback 0, peak_pick,
+offset 0.7); tekrar kuralını geçen kapı yok → val F1 0.786, sahte 6991, tekrar 0.525 → **red**. Ceza, gerçek hızlı
+tekrarları da bastırıyor (sahte bölünme ile gerçek tekrar modelin gözünde ayrılamıyor). Hata düzeltmesi:
+`calibrate_reattack` otomatik seçimi tekrar kuralını uygulamıyordu → `--rep-tol 0.01`.
+
+**Aday (kullanıcı kararı):** kontrol modeli `tabcrnn_g1e13.pt` + ürünün mevcut çözümlemesi
+(`compare_1a_control_productdecoding.log`): val F1 0.804 → 0.810, kare 0.685 → 0.691, tekrar 0.471 → 0.467;
+gaps_test F1 0.818 → 0.824, kare 0.693 → 0.701, tekrar 0.484 → 0.481. Fark tek seed gürültü payında → seed 2 eğitildi
+(değerlendirme bekliyor); ürüne alınmadı (vuruş ağı da yeni modele göre yeniden eğitilmeli).
+
+### Aşama 1b — tını çeşitlendirme: eğitildi, değerlendirme bekliyor
+`scripts/data/build_synth_gaps.py`: `gaps_fit` etiket notaları FreePats (CC0) ve Ichiyanagi (CC BY-NC) sesleriyle,
+nota başına rastgele şiddetle yeniden çalınıp CQT'leri `data/cache/synth/<ses>/gaps_train/` (yalnız eğitim kayıtları;
+diğer kütüphanelerin lisansı yerelde yok). Eğitim `--degrade-root data/cache/synth --degrade-p 0.5` (Katman 6'nın
+alternatif kopya mekanizması). Test B artık "eğitimde görülen tını (FreePats, Ichiyanagi) / görülmeyen (MG, RJS, MDM,
+Custom)" diye ayrı raporlanmalı.
+
+### Dış test — kendi kayıtlarımız (yalnız test, hiçbir seçime girmez)
+`scripts/eval/gv/own_recordings.py`: 18 telefon kaydı (`KAYIT_PROTOKOLU` E01–E05 + görev belgesi T01 tel×perde 0–12,
+T02 aynı nota 3 telde, E15 Autumn Leaves); her notanın teli/perdesi belli → klasik gitarda **gerçekte çalınan tel**
+ilk kez ölçülüyor. classtab yöntemi (LCS). E04/E05'te her akor 2 kez çalındı (kullanıcı). E15 referansı tab PDF'inden
+(çizgi + rakam konumları) çıkarıldı; telifli olduğu için git dışında. Ürün tabanı (`own_baseline.log`):
+
+| | nota bulma | tel, ses | tel, edisyon |
+|---|---|---|---|
+| T01 (78 nota, her tel 0–12) | 0.962 | 0.507 | 0.453 |
+| T02 (aynı nota 3 telde) | 1.000 | 0.361 | 0.361 |
+| E03 / E04 / E05 (1. pozisyon gam, arpej, akor) | 0.565 / 0.698 / 0.567 | 0.385 / 0.343 / 0.706 | 1.000 / 1.000 / 1.000 |
+| E15 Autumn Leaves (47 sn kayıt, 207 notalık tab) | 0.357 (model notalarının 0.822'si eşleşti) | 0.392 | 0.986 |
+
+Bulgu: ses modu klasik gitarda teli sesten ayıramıyor (T02 ≈ şans düzeyi 1/3; GuitarSet'teki 0.880 iyimsermiş, Adım 4
+uyarısı doğrulandı). Edisyon standart pozisyonlarda tam isabetli. → ikinci aşamaya yeni hedef: teli sesten ayırmak.
+
 ## Sıradaki
-- İkinci aşama (eğitim; kullanıcı kararı, önce konuşulacak): parça (%31) ve üst ses (%25) hayaletleri, açık tel
-  sahteleri; ritim tarafında vuruş takibi (yarı otomatik konum 0.590, tap ideal 0.921).
+- 1b ve kontrol seed 2'nin değerlendirmesi (`compare_ckpts`, ürün çözümlemesi + dış test); 1b kontrolü geçemezse
+  aday kontrol modeli. Sonra Aşama 2 (açık tel), Aşama 3 (vuruş ağı; yeni akustik modele göre zaten yeniden eğitilmeli),
+  teli sesten ayırma (dış testin bulgusu).
+- Doğrulama: eşik / kural seçimini icracıya göre 5 katlı CV ile doğrulamak; bootstrap kesinlik aralıkları; karantina
+  kaydı `395_w41wc` sonraki eğitimlerden çıkarılmalı (`train_onset` `gaps_files` kullanıyor, `gaps_training_files` değil).
 - ✓ (22 Ekim) `fetch_gv_data` kütüphane listesi: MG Soft Nylon Guitar (Lite), RJS LoFi Nylon ve MDM Classical
   Guitar v1.01 pianobook paket sayfaları (ücretsiz hesapla indiriliyor), Custom SF2 polyphone.

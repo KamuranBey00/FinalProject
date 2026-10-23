@@ -1,0 +1,22 @@
+== gaps_val (decoding: active gaps_val selection)
+  tabcrnn_deep2.pt       mix 0.7443  note P 0.8265 R 0.7829 F1 0.8041  frame F1 0.6845  fast-repeat miss 0.471 (n 1667)
+    ghosts 4683: overtone 1147, fragment 1566, open string 477, displaced 431, other 1062
+  tabcrnn_g1_s_ep1.pt    mix 0.7456  note P 0.8334 R 0.7774 F1 0.8044  frame F1 0.6868  fast-repeat miss 0.490 (n 1667)
+    ghosts 4427: overtone 1102, fragment 1441, open string 463, displaced 423, other 998
+  tabcrnn_g1_s_ep2.pt    mix 0.7461  note P 0.8338 R 0.7785 F1 0.8052  frame F1 0.6870  fast-repeat miss 0.491 (n 1667)
+    ghosts 4422: overtone 1124, fragment 1394, open string 481, displaced 421, other 1002
+  tabcrnn_g1_s_ep3.pt    mix 0.7441  note P 0.8192 R 0.7867 F1 0.8026  frame F1 0.6856  fast-repeat miss 0.478 (n 1667)
+    ghosts 4947: overtone 1289, fragment 1675, open string 509, displaced 418, other 1056
+  tabcrnn_g3_s_ep1.pt    mix 0.7424  note P 0.8094 R 0.7912 F1 0.8002  frame F1 0.6847  fast-repeat miss 0.448 (n 1667)
+    ghosts 5307: overtone 1239, fragment 1992, open string 549, displaced 439, other 1088
+  tabcrnn_g3_s_ep2.pt    mix 0.7441  note P 0.8321 R 0.7771 F1 0.8037  frame F1 0.6846  fast-repeat miss 0.481 (n 1667)
+    ghosts 4466: overtone 1202, fragment 1416, open string 445, displaced 430, other 973
+  tabcrnn_g3_s_ep3.pt    mix 0.7468  note P 0.8254 R 0.7869 F1 0.8057  frame F1 0.6878  fast-repeat miss 0.473 (n 1667)
+    ghosts 4741: overtone 1104, fragment 1632, open string 502, displaced 417, other 1086
+== gaps_val (decoding: active gaps_val selection)
+  tabcrnn_g10_s_ep1.pt   mix 0.7444  note P 0.8330 R 0.7776 F1 0.8043  frame F1 0.6844  fast-repeat miss 0.481 (n 1667)
+    ghosts 4443: overtone 1053, fragment 1487, open string 484, displaced 422, other 997
+  tabcrnn_g10_s_ep2.pt   mix 0.7449  note P 0.8512 R 0.7645 F1 0.8055  frame F1 0.6843  fast-repeat miss 0.509 (n 1667)
+    ghosts 3807: overtone 1037, fragment 1066, open string 406, displaced 416, other 882
+  tabcrnn_g10_s_ep3.pt   mix 0.7475  note P 0.8429 R 0.7749 F1 0.8075  frame F1 0.6875  fast-repeat miss 0.497 (n 1667)
+    ghosts 4114: overtone 943, fragment 1289, open string 461, displaced 410, other 1011

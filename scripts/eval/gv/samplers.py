@@ -122,10 +122,12 @@ def from_soundfont_bytes(data: bytes) -> list[Sample]:
     return out
 
 
-def render(notes: np.ndarray, lib: list[Sample], velocity: float = 0.5) -> np.ndarray:
+def render(notes: np.ndarray, lib: list[Sample], velocity: float | np.ndarray = 0.5) -> np.ndarray:
+    # velocity: one level for all notes, or one per note (training data: real players do not play every note forte)
     roots = np.array([s.root for s in lib])
     out = np.zeros(int((notes[:, 1].max() + 2) * SR)) if len(notes) else np.zeros(SR)
-    for on, off, pitch in notes:
+    vel = np.broadcast_to(np.asarray(velocity, float), (len(notes),))
+    for (on, off, pitch), v in zip(notes, vel):
         s = lib[int(np.argmin(np.abs(roots - pitch)))]
         ratio = 2 ** ((pitch - s.root) / 12)  # >1 = higher: read the sample faster
         n = int((off - on + RELEASE_S) * SR)
@@ -136,6 +138,6 @@ def render(notes: np.ndarray, lib: list[Sample], velocity: float = 0.5) -> np.nd
         if len(y) > rel:
             y[-rel:] *= np.linspace(1, 0, rel)
         a = int(on * SR)
-        out[a:a + len(y)] += velocity * y[: len(out) - a]
+        out[a:a + len(y)] += v * y[: len(out) - a]
     peak = np.abs(out).max()
     return out / peak * 0.9 if peak > 0 else out

@@ -148,6 +148,29 @@ def fragment_fns(init, device):
     return gs, gaps
 
 
+def ghost_fn(init, device):
+    """README22 Aşama 1a: init modelin, BUGÜNKÜ çözümleme kurallarıyla (aktif gaps_val seçimi) eğitim kayıtlarında
+    ürettiği hayaletlerin (üst ses + parça) başlangıçları. Yalnız eğitime verilen kayıtlarda çağrılır."""
+    from gtab.data.tab_labels import ghost_frames
+    from gtab.data.torch_dataset import _normalize
+    from gtab.decoding.viterbi import energy_rise, segment
+    from gtab.evaluation.pitch_eval import load_selection
+    from gtab.models.stack import active
+    m, _, _ = load_model("crnn", device, init)
+    _, thr, ot, rules = load_selection(ckpt_path(active()["cal"]))["gaps_val"]
+    def fn(path, fr, on):
+        with np.load(path) as d:
+            cqt = d["cqt"]
+        probs, ons, offs, pons = predict_heads(m, _normalize(cqt), device, with_pitch_onset=True)
+        n = min(len(probs), len(fr))
+        est = segment(probs[:n], ons[:n], thr, ot, INSTR, rise=energy_rise(cqt, INSTR)[:n], offsets=offs[:n],
+                      pitch_onsets=pons[:n] if rules.get("onset_source") == "pitch" else None, **rules)
+        out = np.zeros(fr.shape, bool)
+        out[:n] = ghost_frames(est, fr[:n], on[:n], INSTR.pitch_range()[0])
+        return out
+    return fn
+
+
 def make_loader(ds, batch_size, oversample):
     """oversample > 1: hızlı tekrar içeren parçalar bu kat daha sık örneklenir (epoch boyu aynı)."""
     if oversample <= 1:
@@ -164,7 +187,7 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
           repeat_weight=1.0, repeat_gap=3, offset_weight=0.0, valley_weight=1.0, frag_weight=1.0, oversample=1.0, deep=0,
           pitch_onset_weight=0.0, new_lr_mult=1.0, gaps_tab_weight=0.0, overwrite=False,
           string_weights=None, save_epochs=False, prior_debias=0.0, prior_cap=3.0, hex_weight=0.0,
-          degrade_root=None, degrade_p=0.5):
+          degrade_root=None, degrade_p=0.5, ghost_weight=1.0):
     set_seed(seed)
     device = get_device()
     ckpt = ckpt_path(ckpt)
@@ -190,6 +213,11 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
     if frag_weight != 1.0:
         print(f"  fragman taramasi: {init} egitim verisinde (bir kez)")
         gs_frag, gaps_frag = fragment_fns(init, device)
+    gaps_ghost = None
+    if ghost_weight != 1.0:
+        print(f"README22 Asama 1a: hayalet (ust ses + parca) agirligi x{ghost_weight}; tarama {init} + aktif "
+              f"gaps_val cozumlemesi, yalniz egitim kayitlarinda (bir kez)")
+        gaps_ghost = ghost_fn(init, device)
     tab_ds = GuitarSetSeq(CACHE_DIR, tab_splits, CHUNK, onsets=True, onset_soft=onset_soft,
                           short_frames=short_frames, short_weight=short_weight,
                           repeat_weight=repeat_weight, repeat_gap=repeat_gap,
@@ -216,8 +244,11 @@ def train(init, tab_splits, pitch_splits, epochs=15, lr=3e-4, batch_size=16,
         p_tr = make_loader(PitchSeq(tr_f, CHUNK, onsets=True, onset_soft=onset_soft,
                                     repeat_weight=repeat_weight, repeat_gap=repeat_gap,
                                     valley_weight=valley_weight, frag_weight=frag_weight, frag_fn=gaps_frag,
-                                    tab_dir=td, alt_root=degrade_root, alt_p=degrade_p),
+                                    tab_dir=td, alt_root=degrade_root, alt_p=degrade_p,
+                                    ghost_weight=ghost_weight, ghost_fn=gaps_ghost),
                            batch_size, oversample)
+        if gaps_ghost is not None:
+            print(f"  hayalet negatif hucre (kare x perde): {p_tr.dataset.n_ghost}")
         gp_val = DataLoader(PitchSeq(va_f, CHUNK, onsets=True, onset_soft=onset_soft, tab_dir=td),
                             batch_size=batch_size)
         if degrade_root:                               # Katman 6 Adım 2: aynı doğrulama kayıtlarının bozulmuş kopyası 0
@@ -450,6 +481,10 @@ if __name__ == "__main__":
     ap.add_argument("--degrade-root", default=None,
                     help="bozulmus CQT kopyalari (build_degraded: data/cache/degraded); bos = kapali")
     ap.add_argument("--degrade-p", type=float, default=0.5, help="parcanin bozulmus kopyayla verilme olasiligi")
+    # README22 Asama 1a (varsayilan 1 = onceki egitim, birebir)
+    ap.add_argument("--ghost-weight", type=float, default=1.0,
+                    help="init modelin bugunku cozumlemeyle urettigi hayaletlerin (ust ses + parca) baslangicina "
+                         "'vurus yok' agirligi; yalniz egitim kayitlari")
     a = ap.parse_args()
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     train(a.init or None, sp(a.tab_splits), sp(a.pitch_splits), a.epochs, a.lr, a.batch_size,
@@ -464,4 +499,4 @@ if __name__ == "__main__":
           gaps_tab_weight=a.gaps_tab_weight, overwrite=a.overwrite,
           string_weights=tuple(float(v) for v in a.string_weights.split(",")) if a.string_weights else None,
           save_epochs=a.save_epochs, prior_debias=a.prior_debias, prior_cap=a.prior_cap,
-          hex_weight=a.hex_weight, degrade_root=a.degrade_root, degrade_p=a.degrade_p)
+          hex_weight=a.hex_weight, degrade_root=a.degrade_root, degrade_p=a.degrade_p, ghost_weight=a.ghost_weight)

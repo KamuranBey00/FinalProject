@@ -1,0 +1,14 @@
+Katman 3.10 Adim 2 secenekleri: onset_soft=0.3 | GuitarSet perde kaybi agirligi=1.0 | kisa nota: <5 kare x2.0
+Katman 3.10 Adim 3c: tekrar onset agirligi x3.0 (onceki nota <= 3 kare once) | GAPS perde agirligi 2.0 | offset kafasi agirligi 1.0
+Katman 3.11 Adim 4: vadi agirligi x5.0 | fragman agirligi x3.0 | hizli tekrar parcasi ornekleme x3.0
+  fragman taramasi: tabcrnn_deep2.pt egitim verisinde (bir kez)
+  ornekleme: 934/2110 parca hizli tekrar iceriyor (x3.0)
+  ornekleme: 1542/8785 parca hizli tekrar iceriyor (x3.0)
+perde: 203 train / 28 val kaydi (icraciya gore ayrik)
+model: TabCRNNOnset | harmonikler: (0.5, 1, 2, 3, 4, 5) | Katman 3.12: artik blok 2 | perde-onset kafasi True (kayip x1.0) | yeni katman lr x3.0
+baslangic: tabcrnn_deep2.pt
+ep  0 |  | GS-tabF1 0.716 GS-onsetF1 0.642@0.5 GS-perdeOnsetF1(kafa) 0.689@0.5 GAPS-kareF1 0.661 GAPS-onsetF1(tel) 0.484@0.4 GAPS-onsetF1(kafa) 0.524@0.5
+ep  1 | tab 0.068 on 0.222 off 0.194 gsperde 0.027 perde 0.061 ponset 0.012 poffset 0.013 pon 0.032 gpon 0.025 | GS-tabF1 0.714 GS-onsetF1 0.649@0.5 GS-perdeOnsetF1(kafa) 0.688@0.5 GAPS-kareF1 0.661 GAPS-onsetF1(tel) 0.490@0.3 GAPS-onsetF1(kafa) 0.528@0.5
+ep  2 | tab 0.067 on 0.221 off 0.191 gsperde 0.027 perde 0.061 ponset 0.012 poffset 0.013 pon 0.031 gpon 0.024 | GS-tabF1 0.716 GS-onsetF1 0.643@0.5 GS-perdeOnsetF1(kafa) 0.691@0.5 GAPS-kareF1 0.662 GAPS-onsetF1(tel) 0.492@0.3 GAPS-onsetF1(kafa) 0.531@0.5
+ep  3 | tab 0.069 on 0.214 off 0.188 gsperde 0.027 perde 0.061 ponset 0.012 poffset 0.013 pon 0.030 gpon 0.025 | GS-tabF1 0.715 GS-onsetF1 0.640@0.5 GS-perdeOnsetF1(kafa) 0.680@0.5 GAPS-kareF1 0.664 GAPS-onsetF1(tel) 0.481@0.4 GAPS-onsetF1(kafa) 0.518@0.5
+En iyi secim skoru: 0.638 -> C:\Users\HP\Desktop\Projects\Graduation Project\FinalProject\checkpoints\tabcrnn_g1_s.pt | dogrulamada secilen onset esigi: 0.3
